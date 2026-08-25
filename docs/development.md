@@ -1560,7 +1560,7 @@ compilers/python/python.exe tests/tools/ts-services.py build/ts-examples/multi.t
 ### tests/tools/test-live.sh (TVTest を実際に走らせる通し確認)
 
 TvtPlay + BonDriver_Pipe で TS ファイルを再生し、TSMemory.tvtp が取り込んだ
-映像を AviUtl ExEdit2 の代わりのプロセス ([tests/test_receiver.cpp](tests/test_receiver.cpp)) が
+映像を AviUtl ExEdit2 の代わりのプロセス ([tests/test_receiver.cpp](../tests/test_receiver.cpp)) が
 受け取ってデコードするところまでを通します。
 
 ```bash

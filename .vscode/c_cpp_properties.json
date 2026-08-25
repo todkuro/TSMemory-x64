@@ -1,0 +1,43 @@
+{
+	"version": 4,
+	"configurations": [
+		{
+			"name": "TSMemory (llvm-mingw / clang)",
+
+			// 実際のビルド引数は tools/build.sh が書き出す。
+			// これが無いと、-include で入れている src/tvtp/msvc_compat.h が
+			// 見えず、BonTsEngine の min/max が
+			// 「識別子 "max" が定義されていません」になる。
+			//
+			//   bash tools/build.sh    (一度通せば作られる)
+			"compileCommands": "${workspaceFolder}/build/compile_commands.json",
+
+			"compilerPath": "${workspaceFolder}/compilers/llvm-mingw/bin/clang++.exe",
+			"intelliSenseMode": "windows-clang-x64",
+			"cStandard": "c11",
+			"cppStandard": "c++17",
+
+			// 以下は compile_commands.json に載っていないファイル用の控え。
+			// ヘッダを単独で開いた時と、tests/ (tests/tools/test.sh が
+			// その場でコンパイルする) が該当する。
+			"includePath": [
+				"${workspaceFolder}/src/tvtp",
+				"${workspaceFolder}/src/common",
+				"${workspaceFolder}/src/m2v",
+				"${workspaceFolder}/src/aviutl2",
+				"${workspaceFolder}/src/aviutl2/audio",
+				"${workspaceFolder}/sdk/aviutl2",
+				"${workspaceFolder}/tests"
+			],
+			"defines": [
+				"WIN32",
+				"_WINDOWS",
+				"UNICODE",
+				"_UNICODE"
+			],
+			"forcedInclude": [
+				"${workspaceFolder}/src/tvtp/msvc_compat.h"
+			]
+		}
+	]
+}

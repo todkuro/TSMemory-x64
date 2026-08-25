@@ -1,0 +1,27 @@
+// GOP リスト作成中の進捗ダイアログ (m2v の gl_dialog.c が使う)
+#include <windows.h>
+#include "resource.h"
+
+LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
+
+IDD_GL_DIALOG_JA DIALOG DISCARDABLE  0, 0, 188, 93
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "TSMemory : \x51E6\x7406\x4E2D"
+FONT 9, "MS UI Gothic"
+BEGIN
+    PUSHBUTTON      "\x4E2D\x65AD", IDCANCEL, 69, 72, 50, 14
+    CONTROL         "Progress1", IDC_PROGRESS, "msctls_progress32", WS_BORDER, 7, 39, 174, 14
+    CTEXT           "GOP \x30EA\x30B9\x30C8\x3092\x4F5C\x6210\x4E2D\x3067\x3059\x2026", IDC_PERCENT_TEXT, 7, 15, 174, 8
+END
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+
+IDD_GL_DIALOG_EN DIALOG DISCARDABLE  0, 0, 188, 93
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION
+CAPTION "TSMemory : Processing"
+FONT 9, "MS Shell Dlg"
+BEGIN
+    PUSHBUTTON      "Cancel", IDCANCEL, 69, 72, 50, 14
+    CONTROL         "Progress1", IDC_PROGRESS, "msctls_progress32", WS_BORDER, 7, 39, 174, 14
+    CTEXT           "Creating GOP list ...", IDC_PERCENT_TEXT, 7, 15, 174, 8
+END

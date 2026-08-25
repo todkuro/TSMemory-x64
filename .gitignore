@@ -1,0 +1,62 @@
+# ツールチェイン (tools/setup-toolchain.sh / setup-python.sh で取得する)
+/compilers/
+
+# 原典のソースと外部の本体 (tools/setup-*.sh が取得する)
+#   third_party/TVTest   … tools/setup-tvtest-src.sh
+#   third_party/TSMemory … tools/setup-tsmemory-src.sh
+#   third_party/TvtPlay  … tools/setup-tvtplay-src.sh
+#   third_party/aviutl2  … tools/setup-aviutl2.sh
+/third_party/
+
+# ビルド生成物
+#
+# テスト用の TS (build/ts-examples/*.ts) もここに入る。
+# **TS はバージョン管理しない。**管理するのは合成する側
+# (tests/tools/gen-ts-examples.cpp) だけ。
+/build/
+/dist/
+
+/tools/__pycache__/
+
+# 入力プラグインに渡す為の空ファイル (m2v-profile 等が作業ディレクトリに作る)
+*.tvtv
+
+# テスト・デバッグ用のツール
+#
+# ここで書いた物だけをバージョン管理する。
+#
+# 除外して良いのは、**このリポジトリで書いた物ではない**か、
+# 特定の機械にしか無い物を前提にしている場合のみ。
+# 原典も MSVC も AviUtl2 も取得スクリプトで揃うようになったので、
+# 「MSVC が要る」「TVTest が要る」は除外の理由にならない
+# (要る物を取る手順ごと管理する)。
+#
+#   ※ ディレクトリごとではなく /* で除外する事。
+#      ディレクトリを除外すると git が中に降りず、下の ! が効かない。
+/tests/tools/*
+!/tests/tools/test.sh
+!/tests/tools/test-exit.sh
+!/tests/tools/debug-launch.cpp
+!/tests/tools/debug-launch.sh
+!/tests/tools/raw2png.py
+!/tests/tools/ts-services.py
+!/tests/tools/analyze-levels.py
+!/tests/tools/m2v-profile.cpp
+!/tests/tools/m2v-profile.sh
+!/tests/tools/fuzz-locate.cpp
+!/tests/tools/fuzz-locate.sh
+!/tests/tools/gen-ts-examples.cpp
+!/tests/tools/gen-ts-examples.sh
+!/tests/tools/fetch-ts-samples.sh
+!/tests/tools/m2ts2ts.py
+!/tests/tools/setup-msvc.sh
+!/tests/tools/vcxproj.py
+!/tests/tools/build-tvtest.py
+!/tests/tools/test-live.sh
+!/tests/tools/test-live.ps1
+
+# 除外したままにする物:
+#   portable-msvc.py … 第三者のコード (mmozeiko 氏の gist)。
+#                       ライセンスの表示が無いので再配布しない。
+#                       tests/tools/setup-msvc.sh が compilers/ に取得する
+#   __pycache__       … 生成物

@@ -1,0 +1,12 @@
+このフォルダのファイルは TVTest (デジタル放送汎用視聴プログラム実装研究資料)
+に由来します。
+
+    GNU General Public License v2.0 or later (GPL-2.0-or-later)
+
+全文は本リポジトリの licenses/GPL-2.0.txt にあります。
+
+これらをリンクする TSMemory.tvtp は、バイナリ全体が GPL-2.0-or-later の
+対象になります。適用範囲の詳細は本リポジトリの LICENSE.md を参照してください。
+
+なお AviUtl ExEdit2 側のプラグイン (TSMemory-TVTestSrc.aux2) は、
+このフォルダのコードを一切リンクしていません。

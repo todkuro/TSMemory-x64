@@ -1,0 +1,18 @@
+TSMemory-TVTestSrc ver.@VERSION@ (64bit / AviUtl ExEdit2 対応版)
+
+TVTest と AviUtl ExEdit2 を連携させて映像を送る機能を実現するためのプラグインです。
+静止画キャプチャ用途での使用を想定しています。
+
+このパッケージには AviUtl ExEdit2 側のプラグインのみが含まれます。
+TVTest 側のプラグイン (TSMemory.tvtp) は配布物に同梱されているものを
+TVTest の Plugins フォルダに手動で配置してください。
+
+インストールされるもの
+  Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.aux2  汎用プラグイン本体
+  Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.ini   設定ファイル
+  Language\English.TSMemory-TVTestSrc.aul2            英語表示用の言語ファイル
+
+同梱物のライセンス
+  Plugin\TSMemory-TVTestSrc\AviUtl2-Plugin-SDK-license.txt
+    本プラグインは AviUtl ExEdit2 Plugin SDK (The MIT License,
+    Copyright (c) 2025 Kenkun) を利用しています。

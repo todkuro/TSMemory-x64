@@ -1170,6 +1170,13 @@ TSMEMORY_TS_SAMPLE=/path/to/sample.ts TSMEMORY_TS_MULTI=/path/to/multi.ts bash t
 
 `bash tests/tools/test.sh` で下記を確認しています。
 
+> **AviUtl2 を終了してから走らせる事。**
+> `test_plugin` はプラグインを直接読み込んで待ち受けまで動かす為、
+> 既に AviUtl2 が動いていると待ち受けの名前付きミューテックス
+> (`TSMEMORY_IPC_READY_MUTEX`) を先に取られていて、
+> **8 件が失敗する** (「bridge does NOT accept requests before the
+> project is initialized」以下)。設定やコードの不具合ではない。
+
 TS を使うテスト (`test_decode` / `test_adts` / `test_aac_decode` /
 `test_audio` / `test_fuzz` / `test_multich`) は、
 **`build/ts-examples/` に在る TS を 1 本ずつ**通します。

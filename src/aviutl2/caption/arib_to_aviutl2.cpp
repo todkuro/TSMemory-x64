@@ -69,9 +69,16 @@ DWORD AribColorToRgb(int Index)
 
 std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 								const AribToAviUtl2Options &Options,
-								std::vector<int> *pDrcsCodes)
+								std::vector<int> *pDrcsCodes,
+								AribCaptionLayout *pLayout)
 {
 	std::wstring Out;
+
+	//	**位置は「本文が実際に書かれた所」だけを見る。**
+	//	字幕平面の設定 (SDF/SDP) は本文の有無に関わらず送られて来るので、
+	//	そちらを見ると何も書いていない字幕まで位置を持ってしまう
+	int MinX = -1, MinTop = -1;
+	int PlaneW = 960, PlaneH = 540;
 
 	//	**書体を一括で変える為の指定。**
 	//	これを入れておくと、利用者は AviUtl2 側のテキストプリセットを
@@ -95,6 +102,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	//	小型 (SSZ) で書かれているかどうかで見分ける
 	int BaseY = -1;			// 直近の本文の行の Y
 	int PendingY = -1;		// まだ本文が来ていない位置指定
+	int PendingX = -1;
 	int PendingPitch = 0;
 	bool fAnyText = false;
 
@@ -114,6 +122,14 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			PendingY = -1;
 			return;
 		}
+
+		//	**ACPS が指しているのは行の下端。**1 行分引いて上端に直す
+		//	(実測: 行送り 60 で本文 y=509、その 1 行上のルビが y=449)
+		const int Top = PendingY + 1 - (PendingPitch > 0 ? PendingPitch : 60);
+		if (MinTop < 0 || Top < MinTop)
+			MinTop = Top;
+		if (MinX < 0 || PendingX < MinX)
+			MinX = PendingX;
 		const int Threshold = (PendingPitch > 0) ? PendingPitch * 3 / 4 : 1;
 		if (fAnyText && BaseY >= 0 && PendingY - BaseY >= Threshold)
 			Out += L"\n";
@@ -197,6 +213,11 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			break;
 
 		case AribItemType::Geometry:
+			if (it.B > 0) {
+				PlaneH = it.B;
+				//	横は SWF から決まる。540 なら 960、1080 なら 1920
+				PlaneW = it.B * 16 / 9;
+			}
 			//	字幕平面の何ドット角か、を出力の大きさに直す
 			if (Options.UseBroadcastSize && Options.ScreenHeight > 0
 					&& it.A > 0 && it.B > 0) {
@@ -242,6 +263,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		case AribItemType::Position:
 			//	**ここでは改行しない。**この位置に何が書かれるか
 			//	(本文かルビか) を見てから決める必要がある
+			PendingX = it.A;
 			PendingY = it.B;
 			PendingPitch = it.C;
 			break;
@@ -252,5 +274,11 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		}
 	}
 
+	if (pLayout != nullptr) {
+		pLayout->Left = MinX;
+		pLayout->Top = MinTop;
+		pLayout->PlaneWidth = PlaneW;
+		pLayout->PlaneHeight = PlaneH;
+	}
 	return Out;
 }

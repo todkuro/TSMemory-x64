@@ -61,6 +61,23 @@ struct AribToAviUtl2Options {
 	wchar_t DrcsFirstCode = 0xE000;
 };
 
+//	字幕が画面のどこに出るか。
+//
+//	**字幕平面の中での位置**なので、出力の解像度に合わせて割り直す。
+//	Left/Top は字幕の左上 (ドット)。ACPS が指しているのは
+//	行の**下端**なので、1 行分の高さを引いて上端に直してある。
+struct AribCaptionLayout {
+	int Left = -1;			// 負なら位置が判らなかった
+	int Top = -1;
+	int PlaneWidth = 960;
+	int PlaneHeight = 540;
+
+	bool IsValid() const
+	{
+		return Left >= 0 && Top >= 0 && PlaneWidth > 0 && PlaneHeight > 0;
+	}
+};
+
 //	色番号 (0-127) の RGB が判っているか。
 //
 //	**判っているのは既定の色配列 (CLUT 0) の 16 色だけ。**
@@ -73,9 +90,11 @@ bool AribColorIsKnown(int Index);
 //	pDrcsCodes には、割り当てた順に ARIB 側の外字符号が入る
 //	(添字 i が DrcsFirstCode + i に対応する)。フォントを組み立てる側は
 //	この並びと同じ順で字形を並べる。
+//	pLayout に画面上の位置が入る (要らなければ nullptr)。
 std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 								const AribToAviUtl2Options &Options,
-								std::vector<int> *pDrcsCodes);
+								std::vector<int> *pDrcsCodes,
+								AribCaptionLayout *pLayout = nullptr);
 
 //	ARIB の色番号 (0-15) を RGB に直す。既定の CLUT
 DWORD AribColorToRgb(int Index);

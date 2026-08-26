@@ -105,9 +105,27 @@ struct State {
 	int SpaceH = 4, SpaceV = 24;	// SHS / SVS : 字間・行間
 	int PlaneW = 960, PlaneH = 540;	// SWF : 字幕平面そのものの大きさ
 
+	//	今の文字の大きさ。0 標準 / 1 中型 / 2 小型 / 3 倍角。
+	//	**APS の行送りはこれで変わる。**小型の行に標準の送りを使うと、
+	//	画面の外を指す座標になる (実測: 区切りの行が y=990 になり、
+	//	540 の字幕平面をはみ出した)
+	int Size = 0;
+
 	//	1 文字分の送り幅・送り高さ
-	int PitchX() const { return CharW + SpaceH; }
-	int PitchY() const { return CharH + SpaceV; }
+	int PitchX() const
+	{
+		const int p = CharW + SpaceH;
+		if (Size == 3) return p * 2;
+		if (Size == 1 || Size == 2) return p / 2;	// 中型は横だけ半分
+		return p;
+	}
+	int PitchY() const
+	{
+		const int p = CharH + SpaceV;
+		if (Size == 3) return p * 2;
+		if (Size == 2) return p / 2;				// 小型は縦も半分
+		return p;
+	}
 };
 
 
@@ -341,12 +359,14 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 				continue;
 			}
 			switch (b) {
-			case 0x88:	PushSimple(pOut, AribItemType::Size, 2); break;	// SSZ 小型
-			case 0x89:	PushSimple(pOut, AribItemType::Size, 1); break;	// MSZ 中型
-			case 0x8A:	PushSimple(pOut, AribItemType::Size, 0); break;	// NSZ 標準
+			case 0x88:	st.Size = 2; PushSimple(pOut, AribItemType::Size, 2); break;	// SSZ 小型
+			case 0x89:	st.Size = 1; PushSimple(pOut, AribItemType::Size, 1); break;	// MSZ 中型
+			case 0x8A:	st.Size = 0; PushSimple(pOut, AribItemType::Size, 0); break;	// NSZ 標準
 			case 0x8B:	// SZX (1)
-				if (i < Size)
-					PushSimple(pOut, AribItemType::Size, pData[i] == 0x41 ? 3 : 0);
+				if (i < Size) {
+					st.Size = (pData[i] == 0x41) ? 3 : 0;
+					PushSimple(pOut, AribItemType::Size, st.Size);
+				}
 				i++;
 				break;
 			//	**引数の数を 1 つでも間違えると、以降が全て化ける。**

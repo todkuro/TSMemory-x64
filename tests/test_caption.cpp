@@ -307,6 +307,35 @@ void RunUnitTests()
 		check("text after ACPS is kept", AribItemsToPlainText(Items) == L"あ");
 	}
 
+	//	5e. **APS の行送りは文字サイズで変わる**。
+	//	   小型 (SSZ) の行に標準の送りを使うと画面の外を指す
+	//	   (実測: 区切りの行が y=990 になり 540 の字幕平面をはみ出した)
+	{
+		//	SSZ の後に APS 行 15 / 桁 0。行送りは (36+24)/2 = 30
+		const BYTE d[] = { 0x88, 0x1C, 0x4F, 0x40, 0x24, 0x22 };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Y = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position)
+				Y = it.B;
+		}
+		check("APS uses half the line pitch under SSZ", Y == 16 * 30);
+	}
+
+	//	5f. 標準の大きさなら送りはそのまま
+	{
+		const BYTE d[] = { 0x8A, 0x1C, 0x47, 0x40, 0x24, 0x22 };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Y = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position)
+				Y = it.B;
+		}
+		check("APS uses the full line pitch under NSZ", Y == 8 * 60);
+	}
+
 	//	5c. **追加記号の対応表**。CP932 経由にすると別の文字になる。
 	//	   区 92 点 92 は CP932 だと「釗」になっていた (実測)
 	{
@@ -450,6 +479,42 @@ void RunConvertTests()
 		std::vector<int> Drcs;
 		check("the background colour can be turned off",
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><#ffffff>あ");
+	}
+
+	//	3f. **位置**。ACPS は行の下端を指すので 1 行分引いて上端にする
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 509; p.C = 60;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(g); Items.push_back(p); Items.push_back(t);
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, opt, &Drcs, &L);
+		check("the caption position is reported", L.IsValid());
+		check("the top is one line above the ACPS baseline",
+			  L.Left == 200 && L.Top == 509 + 1 - 60);
+		check("the caption plane size comes from the geometry",
+			  L.PlaneWidth == 960 && L.PlaneHeight == 540);
+	}
+
+	//	3g. ルビの位置は無視する (本文の行だけを見る)
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 449; p.C = 60;
+		AribItem sz; sz.Type = AribItemType::Size; sz.A = 2;
+		AribItem r; r.Type = AribItemType::Text; r.Text = L"る";
+		AribItem p2; p2.Type = AribItemType::Position; p2.A = 80; p2.B = 509; p2.C = 60;
+		AribItem n; n.Type = AribItemType::Size; n.A = 0;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(g); Items.push_back(p); Items.push_back(sz); Items.push_back(r);
+		Items.push_back(p2); Items.push_back(n); Items.push_back(t);
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, opt, &Drcs, &L);
+		check("a ruby line does not move the caption position",
+			  L.Left == 80 && L.Top == 509 + 1 - 60);
 	}
 
 	//	3d. **位置が 1 行下がったら改行**。放送は改行を送って来ない
@@ -662,6 +727,7 @@ int main(int argc, char **argv)
 	int Decoded = 0, WithText = 0, DrcsRefs = 0, Positions = 0, Colors = 0;
 	size_t TotalChars = 0;
 	std::vector<std::wstring> Samples, Converted;
+	std::vector<AribCaptionLayout> Layouts;
 
 	for (const CaptionUnit &u : Units) {
 		if (u.Parameter != 0x20)
@@ -691,7 +757,9 @@ int main(int argc, char **argv)
 				opt.Preset = L"字幕";
 				opt.DrcsFont = L"TSMemoryDRCS";
 				std::vector<int> Codes;
-				Converted.push_back(AribItemsToAviUtl2(Items, opt, &Codes));
+				AribCaptionLayout L;
+				Converted.push_back(AribItemsToAviUtl2(Items, opt, &Codes, &L));
+				Layouts.push_back(L);
 			}
 		}
 	}
@@ -725,6 +793,14 @@ int main(int argc, char **argv)
 		const int n = ::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
 		std::vector<char> u8(n > 0 ? n : 1);
 		::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, u8.data(), n, nullptr, nullptr);
+		if (k < Layouts.size() && Layouts[k].IsValid()) {
+			//	1920x1080 に置いた時の左上 (画面中央が原点)
+			const int X = Layouts[k].Left * 1920 / Layouts[k].PlaneWidth - 960;
+			const int Y = Layouts[k].Top * 1080 / Layouts[k].PlaneHeight - 540;
+			std::printf("  (%4d,%4d dots / %dx%d -> 1080p X=%d Y=%d)\n",
+						Layouts[k].Left, Layouts[k].Top,
+						Layouts[k].PlaneWidth, Layouts[k].PlaneHeight, X, Y);
+		}
 		std::printf("  [%s]\n", u8.data());
 	}
 

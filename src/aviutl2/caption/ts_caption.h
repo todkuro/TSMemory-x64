@@ -30,6 +30,9 @@ struct TSMemoryCaption {
 
 	//	AviUtl2 のテキスト (制御文字を含む)
 	std::wstring Text;
+
+	//	字幕平面の中での位置
+	AribCaptionLayout Layout;
 };
 
 class CTSCaptionSource

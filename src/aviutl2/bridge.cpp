@@ -3,6 +3,7 @@
 //----------------------------------------------------------------------------
 #include <windows.h>
 #include <cwchar>
+#include <cstdlib>
 #include <shlwapi.h>
 
 //	StringCchPrintfW を使う。lstrcpynW 等は引き続き使うので非推奨化はしない
@@ -51,6 +52,9 @@ struct BridgeState {
 	bool CaptionBroadcastColor = true;    // 放送の指定した色をそのまま使うか
 	bool CaptionBackColor = true;         // 放送の背景色を影・縁色に流すか
 	bool CaptionBroadcastSize = false;    // 放送の文字の大きさに合わせるか
+	bool CaptionPosition = true;          // 放送の位置に合わせるか
+	int CaptionOffsetX = 0;               // 位置の微調整 (ピクセル)
+	int CaptionOffsetY = 0;
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
 	int ReadyTimeout = 30000;	// 初期化完了の通知が来ない場合の打ち切り (ms)
 
@@ -88,6 +92,31 @@ void ActivateWindow(HWND hwnd)
 	::AttachThreadInput(::GetCurrentThreadId(), ThreadID, TRUE);
 	::SetForegroundWindow(hwnd);
 	::AttachThreadInput(::GetCurrentThreadId(), ThreadID, FALSE);
+}
+
+//	テキストオブジェクトの描画の設定値を書き換える。
+//
+//	**効果名は「標準描画」。**オブジェクト設定の見出しが
+//	「テキスト [標準描画]」になっているのがそれ。
+const WCHAR DRAW_EFFECT[] = L"標準描画";
+
+void SetItemInt(EDIT_SECTION *edit, OBJECT_HANDLE o, LPCWSTR pszItem, int Value)
+{
+	char sz[32];
+	::wsprintfA(sz, "%d", Value);
+	edit->set_object_item_value(o, DRAW_EFFECT, pszItem, sz);
+}
+
+//	書けたかどうかを読み返して確かめる。
+//	**set_object_item_value() は失敗しても何も言わない**ので、
+//	効果名や項目名が違っていると黙って位置が付かないだけになる
+bool VerifyItem(EDIT_SECTION *edit, OBJECT_HANDLE o, LPCWSTR pszItem, int Value)
+{
+	LPCSTR p = edit->get_object_item_value(o, DRAW_EFFECT, pszItem);
+	if (p == nullptr)
+		return false;
+	//	"12.00" のような書式で返るので整数部だけ見る
+	return ::atoi(p) == Value;
 }
 
 //	字幕をタイムラインに置く。
@@ -171,6 +200,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	}
 
 	int Placed = 0;
+	bool fPosOk = true;
 	for (int i = 0; i < Source.GetCount(); i++) {
 		const TSMemoryCaption &c = Source.Get(i);
 		if (c.Text.empty())
@@ -214,6 +244,24 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 								  u8.data(), n, nullptr, nullptr);
 			edit->set_object_item_value(o, L"テキスト", L"テキスト", u8.data());
 		}
+
+		//	放送の位置に合わせる。
+		//
+		//	字幕平面 (960x540 等) の中の座標なので、出力の解像度へ
+		//	割り直してから、画面中央からのずれに直す
+		//	(AviUtl2 のオブジェクト座標は画面中央が原点)。
+		if (g_State.CaptionPosition && c.Layout.IsValid()
+				&& edit->info != nullptr
+				&& edit->info->width > 0 && edit->info->height > 0) {
+			const int X = c.Layout.Left * edit->info->width / c.Layout.PlaneWidth
+						  - edit->info->width / 2 + g_State.CaptionOffsetX;
+			const int Y = c.Layout.Top * edit->info->height / c.Layout.PlaneHeight
+						  - edit->info->height / 2 + g_State.CaptionOffsetY;
+			SetItemInt(edit, o, L"X", X);
+			SetItemInt(edit, o, L"Y", Y);
+			if (Placed == 0)
+				fPosOk = VerifyItem(edit, o, L"X", X);
+		}
 		Placed++;
 	}
 
@@ -224,6 +272,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 					   Placed, Layer + 1,
 					   L" / 外字 ", Source.GetGlyphCount());
 	Log(sz);
+
+	if (!fPosOk) {
+		//	効果名か項目名が違うと黙って位置が付かないだけになる
+		LogWarn(L"TSMemory: 字幕の位置を設定できませんでした "
+				L"(テキストオブジェクトの「標準描画」に X/Y がありません)");
+	}
 
 	if (Source.GetMissingGlyphCount() > 0) {
 		//	**字形の定義がリングバッファの窓より前にあると起こる。**
@@ -528,6 +582,12 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"UseBackColor", 1, ini_file) != 0;
 		g_State.CaptionBroadcastSize =
 			::GetPrivateProfileIntW(L"Caption", L"UseBroadcastSize", 0, ini_file) != 0;
+		g_State.CaptionPosition =
+			::GetPrivateProfileIntW(L"Caption", L"UsePosition", 1, ini_file) != 0;
+		g_State.CaptionOffsetX =
+			::GetPrivateProfileIntW(L"Caption", L"OffsetX", 0, ini_file);
+		g_State.CaptionOffsetY =
+			::GetPrivateProfileIntW(L"Caption", L"OffsetY", 0, ini_file);
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"Preset", L"", sz, ARRAYSIZE(sz));

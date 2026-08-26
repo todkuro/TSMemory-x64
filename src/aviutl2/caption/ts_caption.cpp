@@ -301,7 +301,9 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			if (Param == 0x20) {			// 本文
 				std::vector<AribItem> Items;
 				AribDecodeText(pUnit, Len, &Items);
-				const std::wstring Text = AribItemsToAviUtl2(Items, Options, &DrcsCodes);
+				AribCaptionLayout Layout;
+				const std::wstring Text =
+					AribItemsToAviUtl2(Items, Options, &DrcsCodes, &Layout);
 
 				//	本文の無い物 (画面消去だけ等) は置かない
 				bool fHasChar = false;
@@ -312,6 +314,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 				if (fHasChar) {
 					TSMemoryCaption c;
 					c.Text = Text;
+					c.Layout = Layout;
 					c.Seconds = (Pts >= 0 && VideoStart >= 0)
 								? PtsDiffSeconds(VideoStart, Pts) : -1.0;
 					m_Captions.push_back(c);

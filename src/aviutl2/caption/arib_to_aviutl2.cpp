@@ -35,6 +35,12 @@ void AppendHex(std::wstring *pOut, DWORD Rgb)
 }	// namespace
 
 
+bool AribColorIsKnown(int Index)
+{
+	return Index >= 0 && Index < 16;
+}
+
+
 DWORD AribColorToRgb(int Index)
 {
 	//	既定の CLUT の前半 8 色。後半 8 色は半輝度
@@ -79,14 +85,25 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	//	受け取った順にそのまま出すと、放送側が本文の無い所で何度も
 	//	指定し直す為 <#...><#...><s...> が延々と並び、読めなくなる。
 	int Color = -1, EmittedColor = -1;
+	int Back = -1, EmittedBack = -1;
 	int Size = 0, EmittedSize = 0;
 
 	auto Flush = [&]() {
-		if (Options.UseBroadcastColor && Color >= 0 && Color != EmittedColor) {
+		const bool fColor = Options.UseBroadcastColor && AribColorIsKnown(Color);
+		const bool fBack = Options.UseBroadcastBackColor && AribColorIsKnown(Back);
+		if ((fColor && Color != EmittedColor) || (fBack && Back != EmittedBack)) {
+			//	<#文字色,影縁色>。2 つ目は「背景の箱」ではなく影・縁色で、
+			//	テキストプリセット側で文字装飾を縁取りにして初めて見える
 			Out += L"<#";
-			AppendHex(&Out, AribColorToRgb(Color));
+			if (fColor)
+				AppendHex(&Out, AribColorToRgb(Color));
+			if (fBack) {
+				Out += L",";
+				AppendHex(&Out, AribColorToRgb(Back));
+			}
 			Out += L">";
 			EmittedColor = Color;
+			EmittedBack = Back;
 		}
 		if (Size != EmittedSize) {
 			//	0 標準 / 1 中型 (横半分) / 2 小型 (縦横半分) / 3 倍角
@@ -116,6 +133,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		case AribItemType::Color:
 			Color = it.A;
+			break;
+
+		case AribItemType::BackColor:
+			Back = it.A;
 			break;
 
 		case AribItemType::Size:

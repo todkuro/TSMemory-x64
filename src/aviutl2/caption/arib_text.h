@@ -24,6 +24,7 @@ enum class AribItemType {
 	Text,			// 本文
 	Drcs,			// 外字。A = 符号 (どの字形かは別途 DRCS 定義から引く)
 	Color,			// A = 前景色 (0-15)
+	BackColor,		// A = 背景色 (0-15)
 	Size,			// A = 0:標準 1:中型 2:小型 3:倍角
 	Position,		// A = 桁, B = 行 (APS)
 	ClearScreen,	// 画面消去 (CS)

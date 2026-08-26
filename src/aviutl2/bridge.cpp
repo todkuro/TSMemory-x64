@@ -49,6 +49,7 @@ struct BridgeState {
 	std::wstring CaptionPreset;           // 本文の先頭に入れる <$...>
 	std::wstring CaptionDrcsFont = L"TSMemory DRCS";
 	bool CaptionBroadcastColor = true;    // 放送の指定した色をそのまま使うか
+	bool CaptionBackColor = true;         // 放送の背景色を影・縁色に流すか
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
 	int ReadyTimeout = 30000;	// 初期化完了の通知が来ない場合の打ち切り (ms)
 
@@ -136,6 +137,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	opt.Preset = g_State.CaptionPreset;
 	opt.DrcsFont = g_State.CaptionDrcsFont;
 	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
+	opt.UseBroadcastBackColor = g_State.CaptionBackColor;
 
 	CTSCaptionSource Source;
 	if (!Source.Open(szName, opt)) {
@@ -519,6 +521,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			g_State.CaptionLayer = 0;
 		g_State.CaptionBroadcastColor =
 			::GetPrivateProfileIntW(L"Caption", L"UseBroadcastColor", 1, ini_file) != 0;
+		g_State.CaptionBackColor =
+			::GetPrivateProfileIntW(L"Caption", L"UseBackColor", 1, ini_file) != 0;
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"Preset", L"", sz, ARRAYSIZE(sz));

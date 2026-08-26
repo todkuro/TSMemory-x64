@@ -240,6 +240,22 @@ void RunUnitTests()
 		AribDecodeText(d, sizeof(d), &Items);
 		check("0x90 with 0x20 takes two bytes, otherwise one",
 			  AribItemsToPlainText(Items) == L"あ");
+
+		//	**`90 20 44` は色そのものではなく色配列 (CLUT) の選択。**
+		//	これを前景色として扱うと字幕がほぼ全て同じ色に染まる
+		//	(実測では全ての字幕文が青字になっていた)。
+		//	`90 51` の背景色は選ばれた配列の中の 1 番なので 4 * 16 + 1
+		int Colors = 0, Backs = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Color) Colors++;
+			if (it.Type == AribItemType::BackColor) Backs = it.A;
+		}
+		check("the colour map selection is not a foreground colour",
+			  Colors == 0);
+		check("the colour index is taken within the selected map",
+			  Backs == 4 * 16 + 1);
+		check("colours outside the default map are reported as unknown",
+			  !AribColorIsKnown(Backs) && AribColorIsKnown(7));
 	}
 
 	//	4. CSI (可変長)。位置指定等がテキストを飲み込まない事
@@ -341,6 +357,34 @@ void RunConvertTests()
 		std::vector<int> Drcs;
 		check("the broadcast colour can be turned off",
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>あ");
+	}
+
+	//	3b. 背景色。<#文字色,影縁色> の 2 つ目に流す。
+	//	**AviUtl2 には「背景の箱」が無い。**放送の黒背景は影・縁色として
+	//	渡し、テキストプリセット側の文字装飾 (縁取り) で見える形にする
+	{
+		std::vector<AribItem> Items;
+		AribItem c; c.Type = AribItemType::Color; c.A = 7;		// 白
+		AribItem b; b.Type = AribItemType::BackColor; b.A = 0;	// 黒
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(c); Items.push_back(b); Items.push_back(t);
+		std::vector<int> Drcs;
+		check("the background colour becomes the second colour",
+			  AribItemsToAviUtl2(Items, opt, &Drcs) == L"<$字幕><#ffffff,000000>あ");
+	}
+
+	//	3c. 背景色だけを切れる
+	{
+		std::vector<AribItem> Items;
+		AribItem c; c.Type = AribItemType::Color; c.A = 7;
+		AribItem b; b.Type = AribItemType::BackColor; b.A = 0;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(c); Items.push_back(b); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastBackColor = false;
+		std::vector<int> Drcs;
+		check("the background colour can be turned off",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><#ffffff>あ");
 	}
 
 	//	4. 外字。1 文字だけフォントを切り替え、本文の書体は保つ

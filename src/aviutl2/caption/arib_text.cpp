@@ -113,6 +113,10 @@ struct State {
 	int GL = 0;			// GL に呼び出している G の番号
 	int GR = 2;
 	int Single = -1;	// 単一シフト中なら G の番号
+
+	//	COL で選ばれている色配列 (CLUT) の番号。
+	//	色の指定は「この番号 * 16 + 下位ニブル」で 128 色の中を指す
+	int ColorMap = 0;
 };
 
 
@@ -155,24 +159,36 @@ void PushSimple(std::vector<AribItem> *pOut, AribItemType Type, int A = 0, int B
 //	  0x40+n … 前景色 / 0x50+n … 背景色 / 0x60,0x70 … 半透過
 //	区別せず全部を前景色として扱うと、背景色が文字色を上書きしてしまう
 //	(実測でも `90 20 44` = 前景 4、`90 51` = 背景 1 と並んでいた)。
-size_t PushColor(std::vector<AribItem> *pOut, const BYTE *pData, size_t Size, size_t i)
+size_t PushColor(std::vector<AribItem> *pOut, const BYTE *pData, size_t Size,
+				 size_t i, int *pColorMap)
 {
 	if (i >= Size)
 		return i;
 
-	//	0x20 が続く形は「色マップの指定 + 値」の 2 バイト
+	//	**0x20 が続く形は色そのものではなく、色配列 (CLUT) の選択。**
+	//	ここを前景色として扱うと、字幕がほぼ全て同じ色に染まる。
+	//	実測 (放送 25 番組の字幕文 36 件) では
+	//	`90 20 44` (22 件) と `90 20 40` (4 件) の 2 種類しか現れず、
+	//	番組をまたいで同じ値だった。話者ごとに変わる色ではない
 	if (pData[i] == 0x20) {
 		if (i + 1 >= Size)
 			return Size;
-		const BYTE v = pData[i + 1];
-		if ((v & 0xF0) == 0x40)
-			PushSimple(pOut, AribItemType::Color, v & 0x0F);
+		if ((pData[i + 1] & 0xF0) == 0x40)
+			*pColorMap = pData[i + 1] & 0x0F;
 		return i + 2;
 	}
 
+	//	上位ニブルが前景 (0x40) か背景 (0x50) かを決める。
+	//	**両方を Color にすると背景の指定で文字色が上書きされる。**
+	//	下位ニブルは選択中の CLUT の中での番号
 	const BYTE v = pData[i];
-	if ((v & 0xF0) == 0x40 || v < 0x10)
-		PushSimple(pOut, AribItemType::Color, v & 0x0F);
+	const int Base = *pColorMap * 16;
+	if (v < 0x10)
+		PushSimple(pOut, AribItemType::Color, Base + (v & 0x0F));
+	else if ((v & 0xF0) == 0x40)
+		PushSimple(pOut, AribItemType::Color, Base + (v & 0x0F));
+	else if ((v & 0xF0) == 0x50)
+		PushSimple(pOut, AribItemType::BackColor, Base + (v & 0x0F));
 	return i + 1;
 }
 
@@ -270,7 +286,7 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 				i++;
 				break;
 			case 0x8C:	// COL
-				i = PushColor(pOut, pData, Size, i);
+				i = PushColor(pOut, pData, Size, i, &st.ColorMap);
 				break;
 			case 0x90:
 				//	**実データに合わせている。**
@@ -278,7 +294,7 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 				//	「0x20 が続けば 2 バイト、そうでなければ 1 バイト」の形。
 				//	1 バイト固定で読むと次の文字とずれ、以降が全て化ける。
 				//	続く値も 0x40+n / 0x50+n と色指定の並びになっている
-				i = PushColor(pOut, pData, Size, i);
+				i = PushColor(pOut, pData, Size, i, &st.ColorMap);
 				break;
 
 			case 0x8D: case 0x8E: case 0x8F:	// FLC / CDC / POL

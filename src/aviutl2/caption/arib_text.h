@@ -26,7 +26,7 @@ enum class AribItemType {
 	Color,			// A = 前景色 (0-15)
 	BackColor,		// A = 背景色 (0-15)
 	Size,			// A = 0:標準 1:中型 2:小型 3:倍角
-	Position,		// A = 桁, B = 行 (APS)
+	Position,		// A = X, B = Y (字幕平面のドット。APS も ACPS もここに来る)
 	ClearScreen,	// 画面消去 (CS)
 	LineBreak,		// 改行 (APD / APR)
 };
@@ -36,6 +36,10 @@ struct AribItem {
 	std::wstring Text;		// Text の時だけ
 	int A = 0;
 	int B = 0;
+
+	//	Position の時だけ。その時点の行送りの高さ (SSM + SVS)。
+	//	ルビは半行だけ上下するので、改行かどうかの判定に要る
+	int C = 0;
 };
 
 //	字幕文データ (data_unit の本文) を解く。

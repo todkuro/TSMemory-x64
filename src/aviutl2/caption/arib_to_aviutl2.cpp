@@ -84,9 +84,37 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	//	**属性は「変わった時に、本文の直前で」出す。**
 	//	受け取った順にそのまま出すと、放送側が本文の無い所で何度も
 	//	指定し直す為 <#...><#...><s...> が延々と並び、読めなくなる。
+	//	**放送の字幕は改行を送って来ない。**
+	//	1 行ごとに ACPS で座標を打つ形なので、位置が下に動いたら
+	//	そこが改行。読み飛ばすと全ての行が繋がって 1 行になる。
+	//
+	//	**ルビは行として数えない。**ルビは本文の 1 行上に、本文より
+	//	先に書かれる (実測: ルビ y=449 → 本文 y=509、行送り 60)。
+	//	位置が動いたら即改行にすると「ルビ / 本文」で毎回割れる。
+	//	小型 (SSZ) で書かれているかどうかで見分ける
+	int BaseY = -1;			// 直近の本文の行の Y
+	int PendingY = -1;		// まだ本文が来ていない位置指定
+	int PendingPitch = 0;
+	bool fAnyText = false;
+
 	int Color = -1, EmittedColor = -1;
 	int Back = -1, EmittedBack = -1;
 	int Size = 0, EmittedSize = 0;
+
+	//	本文を出す直前に呼ぶ。行が変わっていたら改行を入れる
+	auto NewLine = [&]() {
+		if (PendingY < 0)
+			return;
+		if (Size == 2) {		// 小型 = ルビ。行としては数えない
+			PendingY = -1;
+			return;
+		}
+		const int Threshold = (PendingPitch > 0) ? PendingPitch * 3 / 4 : 1;
+		if (fAnyText && BaseY >= 0 && PendingY - BaseY >= Threshold)
+			Out += L"\n";
+		BaseY = PendingY;
+		PendingY = -1;
+	};
 
 	auto Flush = [&]() {
 		const bool fColor = Options.UseBroadcastColor && AribColorIsKnown(Color);
@@ -123,8 +151,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	for (const AribItem &it : Items) {
 		switch (it.Type) {
 		case AribItemType::Text:
+			NewLine();
 			Flush();
 			Out += Escape(it.Text);
+			fAnyText = true;
 			break;
 
 		case AribItemType::LineBreak:
@@ -144,6 +174,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			break;
 
 		case AribItemType::Drcs: {
+			NewLine();
 			Flush();
 			if (Options.DrcsFont.empty() || pDrcsCodes == nullptr) {
 				Out += Options.DrcsFallback;
@@ -169,14 +200,19 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			Out += L">";
 			Out += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
 			Out += L"<@>";			// 元の書体に戻す
+			fAnyText = true;
 			break;
 		}
 
-		case AribItemType::ClearScreen:
 		case AribItemType::Position:
-			//	画面消去は字幕の区切りとして呼び出し側が使う。
-			//	位置指定は字幕平面の大きさ (CSI SDF/SDP) が要る為、
-			//	ここでは扱わない (改行として現れる)
+			//	**ここでは改行しない。**この位置に何が書かれるか
+			//	(本文かルビか) を見てから決める必要がある
+			PendingY = it.B;
+			PendingPitch = it.C;
+			break;
+
+		case AribItemType::ClearScreen:
+			//	画面消去は字幕の区切りとして呼び出し側が使う
 			break;
 		}
 	}

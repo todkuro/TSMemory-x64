@@ -282,6 +282,30 @@ void RunUnitTests()
 		check("text after APS is kept", AribItemsToPlainText(Items) == L"あ");
 	}
 
+	//	5b. **ACPS (CSI ... 0x20 'a')**。放送はこれで 1 行ずつ位置を打つ。
+	//	   CSI を丸ごと読み飛ばすと行が全て繋がって 1 行になる
+	{
+		//	CSI "36;36" SP 'W' (文字 36x36) / CSI "24" SP 'Y' (行間 24) /
+		//	CSI "200;449" SP 'a' の後に「あ」
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x32, 0x34, 0x20, 0x59,
+			0x9B, 0x32, 0x30, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x24, 0x22,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int X = -1, Y = -1, Pitch = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position) {
+				X = it.A; Y = it.B; Pitch = it.C;
+			}
+		}
+		check("ACPS gives the position in dots", X == 200 && Y == 449);
+		check("the line pitch comes from SSM and SVS", Pitch == 36 + 24);
+		check("text after ACPS is kept", AribItemsToPlainText(Items) == L"あ");
+	}
+
 	//	6. 外字 (DRCS)。ESC 0x24 0x28 0x20 0x41 で G0 を 2 バイト外字にする
 	{
 		const BYTE d[] = { 0x1B, 0x24, 0x28, 0x20, 0x41, 0x21, 0x21 };
@@ -385,6 +409,40 @@ void RunConvertTests()
 		std::vector<int> Drcs;
 		check("the background colour can be turned off",
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><#ffffff>あ");
+	}
+
+	//	3d. **位置が 1 行下がったら改行**。放送は改行を送って来ない
+	{
+		std::vector<AribItem> Items;
+		AribItem p; p.Type = AribItemType::Position; p.A = 80; p.B = 509; p.C = 60;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		AribItem p2 = p; p2.B = 569;
+		AribItem t2 = t; t2.Text = L"い";
+		Items.push_back(p); Items.push_back(t);
+		Items.push_back(p2); Items.push_back(t2);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("a line below becomes a line break",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>あ\nい");
+	}
+
+	//	3e. **ルビは行として数えない**。ルビは本文の 1 行上に先に書かれる
+	{
+		std::vector<AribItem> Items;
+		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 449; p.C = 60;
+		AribItem sz; sz.Type = AribItemType::Size; sz.A = 2;		// 小型 = ルビ
+		AribItem r; r.Type = AribItemType::Text; r.Text = L"る";
+		AribItem p2 = p; p2.B = 509;
+		AribItem n; n.Type = AribItemType::Size; n.A = 0;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(p); Items.push_back(sz); Items.push_back(r);
+		Items.push_back(p2); Items.push_back(n); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("a ruby line does not become a line break",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><s*0.5>る<s>あ");
 	}
 
 	//	4. 外字。1 文字だけフォントを切り替え、本文の書体は保つ

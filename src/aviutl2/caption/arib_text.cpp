@@ -117,18 +117,76 @@ struct State {
 	//	COL で選ばれている色配列 (CLUT) の番号。
 	//	色の指定は「この番号 * 16 + 下位ニブル」で 128 色の中を指す
 	int ColorMap = 0;
+
+	//	字幕平面の作り。CSI で指定されて来る。
+	//	既定は SWF 7 (960x540) の標準的な値
+	int OrigX = 0, OrigY = 0;		// SDP : 表示領域の左上
+	int CharW = 36, CharH = 36;		// SSM : 文字の大きさ
+	int SpaceH = 4, SpaceV = 24;	// SHS / SVS : 字間・行間
+
+	//	1 文字分の送り幅・送り高さ
+	int PitchX() const { return CharW + SpaceH; }
+	int PitchY() const { return CharH + SpaceV; }
 };
 
 
-//	CSI の引数は 0x30-0x39 と 0x3B が続き、0x20 + 終端バイトで終わる
-size_t SkipCsi(const BYTE *p, size_t Size, size_t i)
+void PushSimple(std::vector<AribItem> *pOut, AribItemType Type,
+				int A = 0, int B = 0, int C = 0);
+
+//	CSI の引数は 0x30-0x39 と 0x3B が続き、0x20 + 終端バイトで終わる。
+//
+//	**位置指定はここに入っている。**放送の字幕は改行 (APD) ではなく
+//	ACPS で 1 行ずつ座標を打って来る為、CSI を読み飛ばすと
+//	**行が全て繋がって 1 行になる**。
+size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
+				State *pSt, std::vector<AribItem> *pOut)
 {
-	while (i < Size && ((p[i] >= 0x30 && p[i] <= 0x39) || p[i] == 0x3B))
+	int Param[8] = {};
+	int Count = 0;
+	int Value = 0;
+	bool fAny = false;
+
+	while (i < Size && ((p[i] >= 0x30 && p[i] <= 0x39) || p[i] == 0x3B)) {
+		if (p[i] == 0x3B) {
+			if (Count < 8) Param[Count++] = Value;
+			Value = 0;
+			fAny = false;
+		} else {
+			Value = Value * 10 + (p[i] - 0x30);
+			fAny = true;
+		}
 		i++;
+	}
+	if (fAny && Count < 8)
+		Param[Count++] = Value;
+
 	if (i < Size && p[i] == 0x20)
 		i++;
-	if (i < Size)
-		i++;			// 終端バイト
+	if (i >= Size)
+		return Size;
+
+	const BYTE Final = p[i++];
+	switch (Final) {
+	case 0x5F:		// SDP : 表示領域の左上
+		if (Count >= 2) { pSt->OrigX = Param[0]; pSt->OrigY = Param[1]; }
+		break;
+	case 0x57:		// SSM : 文字の大きさ
+		if (Count >= 2) { pSt->CharW = Param[0]; pSt->CharH = Param[1]; }
+		break;
+	case 0x58:		// SHS : 字間
+		if (Count >= 1) pSt->SpaceH = Param[0];
+		break;
+	case 0x59:		// SVS : 行間
+		if (Count >= 1) pSt->SpaceV = Param[0];
+		break;
+	case 0x61:		// ACPS : 表示位置 (ドット)
+		if (Count >= 2)
+			PushSimple(pOut, AribItemType::Position, Param[0], Param[1],
+					   pSt->PitchY());
+		break;
+	default:
+		break;
+	}
 	return i;
 }
 
@@ -146,12 +204,13 @@ void PushText(std::vector<AribItem> *pOut, const std::wstring &s)
 	pOut->push_back(it);
 }
 
-void PushSimple(std::vector<AribItem> *pOut, AribItemType Type, int A = 0, int B = 0)
+void PushSimple(std::vector<AribItem> *pOut, AribItemType Type, int A, int B, int C)
 {
 	AribItem it;
 	it.Type = Type;
 	it.A = A;
 	it.B = B;
+	it.C = C;
 	pOut->push_back(it);
 }
 
@@ -218,9 +277,15 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 			case 0x1D:	st.Single = 3; break;								// SS3
 			case 0x16:	i++; break;											// PAPF (1)
 			case 0x1C:	// APS (2) : 行, 桁
+				//	**ACPS と単位を揃えてドットで持つ。**
+				//	混ざったまま渡すと呼び出し側が区別できない
 				if (i + 1 < Size) {
+					const int Row = pData[i] & 0x3F;
+					const int Col = pData[i + 1] & 0x3F;
 					PushSimple(pOut, AribItemType::Position,
-							   pData[i + 1] & 0x3F, pData[i] & 0x3F);
+							   st.OrigX + Col * st.PitchX(),
+							   st.OrigY + (Row + 1) * st.PitchY(),
+							   st.PitchY());
 				}
 				i += 2;
 				break;
@@ -306,7 +371,7 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 			case 0x95: case 0x96:				// SPL / STL (引数なし)
 				break;
 			case 0x98:	i += 2; break;			// TIME
-			case 0x9B:	i = SkipCsi(pData, Size, i); break;	// CSI
+			case 0x9B:	i = ParseCsi(pData, Size, i, &st, pOut); break;	// CSI
 			case 0x9D:	i += 2; break;			// TIME (別符号位置)
 			default:
 				break;

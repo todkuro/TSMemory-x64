@@ -55,6 +55,7 @@ struct BridgeState {
 	bool CaptionPosition = true;          // 放送の位置に合わせるか
 	int CaptionBackOpacity = 50;          // 背景の不透明度 (0 で背景なし)
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
+	bool CaptionDebug = false;            // 1 件目のオブジェクトの中身をログに出す
 	int CaptionOffsetX = 0;               // 位置の微調整 (ピクセル)
 	int CaptionOffsetY = 0;
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
@@ -119,6 +120,45 @@ bool VerifyItem(EDIT_SECTION *edit, OBJECT_HANDLE o, LPCWSTR pszItem, int Value)
 		return false;
 	//	"12.00" のような書式で返るので整数部だけ見る
 	return ::atoi(p) == Value;
+}
+
+//	オブジェクトの中身をそのままログに出す。
+//
+//	**位置がずれる等の切り分けはこれが一番早い。**
+//	効果名も項目名も値の書式も、推測せずに実物を見られる。
+//	[Caption] Debug=1 の時だけ、1 件目について出す
+void DumpObject(EDIT_SECTION *edit, OBJECT_HANDLE o)
+{
+	LPCSTR p = edit->get_object_alias(o);
+	if (p == nullptr) {
+		LogWarn(L"TSMemory: オブジェクトの中身を取得できませんでした");
+		return;
+	}
+
+	//	UTF-8 で返る。行ごとにログへ出す (長いので上限を設ける)
+	const int n = ::MultiByteToWideChar(CP_UTF8, 0, p, -1, nullptr, 0);
+	if (n <= 0)
+		return;
+	std::vector<WCHAR> w(n);
+	::MultiByteToWideChar(CP_UTF8, 0, p, -1, w.data(), n);
+
+	Log(L"TSMemory: --- 1 件目のオブジェクトの中身 ---");
+	std::wstring Line;
+	int Count = 0;
+	for (int i = 0; w[i] != L'\0' && Count < 80; i++) {
+		if (w[i] == L'\r')
+			continue;
+		if (w[i] != L'\n') {
+			Line += w[i];
+			continue;
+		}
+		WCHAR sz[256];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz), L"TSMemory:   %s", Line.c_str());
+		Log(sz);
+		Line.clear();
+		Count++;
+	}
+	Log(L"TSMemory: --- ここまで ---");
 }
 
 //	字幕をタイムラインに置く。
@@ -274,6 +314,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 								   c.Left, c.Top, c.PlaneWidth, c.PlaneHeight,
 								   X, Y);
 				Log(szp);
+				if (g_State.CaptionDebug)
+					DumpObject(edit, o);
 			}
 		}
 		//	放送と同じ半透明の箱を敷く。
@@ -631,6 +673,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"OffsetY", 0, ini_file);
 		g_State.CaptionBackOpacity =
 			::GetPrivateProfileIntW(L"Caption", L"BackOpacity", 50, ini_file);
+		g_State.CaptionDebug =
+			::GetPrivateProfileIntW(L"Caption", L"Debug", 0, ini_file) != 0;
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"BackScript",

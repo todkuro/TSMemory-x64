@@ -4,6 +4,7 @@
 --track@alpha:不透明度,0,100,50,1
 --color@bgcol:背景色,0x000000
 --check@round:角を丸くする,0
+--check@dbg:デバッグ表示,0
 --[[
 	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷く。
 
@@ -12,6 +13,13 @@
 	後からフォントや文字サイズを変えると箱がずれる。
 	このスクリプトは描画後の obj.w / obj.h を見るので、
 	書体・サイズ・文言を変えても箱が付いて来る。
+
+	**フレームバッファに直接 obj.draw() してはいけない。**
+	「obj.draw() を使用した場合スクリプト以降のフィルタ効果は
+	実行されません」(lua.txt) ので、後ろにある標準描画が飛ばされ、
+	オブジェクトの X/Y も拡大率も効かなくなる。
+	仮想バッファの中で合成してオブジェクトに書き戻し、
+	描画そのものは本体に任せる。
 
 	放送の背景は文字セル (36 ドット角 + 字間 4 / 行間 24) の大きさで、
 	字形より一回り大きい。余白の既定値はそこから決めている。
@@ -23,7 +31,7 @@ local w = obj.w
 local h = obj.h
 
 if w > 0 and h > 0 and alpha > 0 then
-	--	テキストを退避する。**先に w/h を取っておく事。**
+	--	**先に w/h を取っておく事。**
 	--	obj.load() を呼ぶとオブジェクトの画像が図形に差し替わる
 	local saved = "cache:tsmemory_caption_bg"
 	obj.copybuffer(saved, "object")
@@ -42,11 +50,26 @@ if w > 0 and h > 0 and alpha > 0 then
 		aspect = 1.0 - bw / bh
 	end
 
-	obj.load("figure", "四角形", bgcol, size, 0, round == 1, aspect)
+	--	仮想バッファの中で「背景 + テキスト」を組み立てる。
+	--	仮想バッファへの描画はオブジェクトの座標を反映せず、
+	--	引数の座標そのままで描かれる (中心が 0,0)
+	obj.setoption("drawtarget", "tempbuffer", bw, bh)
+
+	local ok = obj.load("figure", "四角形", bgcol, size, 0, round == 1, aspect)
 	obj.draw(0, 0, 0, 1.0, alpha / 100)
 
-	--	テキストを戻して上に重ねる。
-	--	**obj.draw() を呼んだ後は自動描画されない**ので自分で描く
 	obj.copybuffer("object", saved)
-	obj.draw()
+	obj.draw(0, 0, 0, 1.0, 1.0)
+
+	obj.setoption("drawtarget", "framebuffer")
+	obj.copybuffer("object", "tempbuffer")
+
+	if dbg == 1 then
+		obj.mes("TSMemory字幕背景: text=" .. w .. "x" .. h
+				.. " box=" .. bw .. "x" .. bh
+				.. " size=" .. string.format("%.1f", size)
+				.. " aspect=" .. string.format("%.3f", aspect)
+				.. " figure=" .. tostring(ok)
+				.. " -> obj=" .. obj.w .. "x" .. obj.h)
+	end
 end

@@ -262,8 +262,19 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 						  - edit->info->height / 2 + g_State.CaptionOffsetY;
 			SetItemInt(edit, o, L"X", X);
 			SetItemInt(edit, o, L"Y", Y);
-			if (Placed == 0)
+			if (Placed == 0) {
 				fPosOk = VerifyItem(edit, o, L"X", X);
+
+				//	**位置がずれた時の切り分け用。**
+				//	字幕平面の座標と、実際に設定した値の両方を残す
+				WCHAR szp[192];
+				::StringCchPrintfW(szp, ARRAYSIZE(szp),
+								   L"TSMemory: 1 件目の位置 : 字幕平面 (%d,%d) "
+								   L"/ %dx%d -> X=%d Y=%d",
+								   c.Left, c.Top, c.PlaneWidth, c.PlaneHeight,
+								   X, Y);
+				Log(szp);
+			}
 		}
 		//	放送と同じ半透明の箱を敷く。
 		//

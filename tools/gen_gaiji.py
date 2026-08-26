@@ -28,6 +28,21 @@ def read_u32_array(path, name):
     return [int(v, 0) for v in re.findall(r"0[xX][0-9a-fA-F]+|\b\d+\b", body)]
 
 
+def read_clut(path):
+    """`extern const ColorRGBA kB24ColorCLUT[][16] = { ... };` を読む"""
+    text = open(path, encoding="utf-8-sig").read()
+    m = re.search(r"kB24ColorCLUT\s*\[\s*\]\s*\[\s*16\s*\]\s*=\s*\{(.*?)\n\};",
+                  text, re.S)
+    if m is None:
+        raise SystemExit("色表が見つかりません: %s" % path)
+    out = [tuple(int(v) for v in c)
+           for c in re.findall(r"ColorRGBA\(\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\s*\)",
+                               m.group(1))]
+    if len(out) < 128:
+        raise SystemExit("色が 128 個に足りません: %d" % len(out))
+    return out[:128]
+
+
 def read_macros(path):
     """`inline constexpr uint8_t kDefaultMacros[][20] = { {..}, ... };` を読む"""
     text = open(path, encoding="utf-8-sig").read()
@@ -65,7 +80,9 @@ def main():
     gaiji_h = src + "/src/decoder/b24_gaiji_table.hpp"
     conv_h = src + "/src/decoder/b24_conv_tables.hpp"
     macro_h = src + "/src/decoder/b24_macros.hpp"
+    color_c = src + "/src/decoder/b24_colors.cpp"
 
+    clut = read_clut(color_c)
     macros = read_macros(macro_h)
     kanji = read_u32_array(conv_h, "kKanjiTable")
 
@@ -160,6 +177,18 @@ def main():
     w("//\t英数は全角。中型 (MSZ) の時に半角相当の見た目になる")
     for name, _ in singles:
         w("WCHAR TSMemoryArib%s(BYTE Code);" % name)
+    w("")
+    w("//\tARIB の色表 (128 色)。色番号は「色配列 * 16 + 番号」。")
+    w("//")
+    w("//\t**背景は半透明の黒。**放送は色配列 4 を選び背景に 1 番を使うので、")
+    w("//\t索引 65 = (0, 0, 0, α128) になる。字幕の背景が黒い箱に見えるのは")
+    w("//\tこの為で、TVCaptionMod2 の「背景の不透明度」もこのアルファを触る。")
+    w("struct TSMemoryAribColor {")
+    w("\tBYTE R, G, B, A;")
+    w("};")
+    w("")
+    w("//\t範囲の外なら透明 (A = 0) を返す")
+    w("TSMemoryAribColor TSMemoryAribClut(int Index);")
 
     open(out, "w", encoding="utf-8", newline="\n").write("\n".join(lines) + "\n")
 
@@ -237,6 +266,22 @@ def main():
     w("\tif (pLength != nullptr)")
     w("\t\t*pLength = g_MacroLength[Index];")
     w("\treturn g_Macros[Index];")
+    w("}")
+
+    w("")
+    w("")
+    w("TSMemoryAribColor TSMemoryAribClut(int Index)")
+    w("{")
+    w("\tstatic const TSMemoryAribColor Table[128] = {")
+    for i in range(0, 128, 4):
+        w("\t\t" + " ".join("{%3d,%3d,%3d,%3d}," % c for c in clut[i:i + 4]))
+    w("\t};")
+    w("")
+    w("\tif (Index < 0 || Index >= 128) {")
+    w("\t\tconst TSMemoryAribColor Clear = { 0, 0, 0, 0 };")
+    w("\t\treturn Clear;")
+    w("\t}")
+    w("\treturn Table[Index];")
     w("}")
 
     for name, values in single_tables:

@@ -46,3 +46,15 @@ WCHAR TSMemoryAribAlnum(BYTE Code);
 WCHAR TSMemoryAribHiragana(BYTE Code);
 WCHAR TSMemoryAribKatakana(BYTE Code);
 WCHAR TSMemoryAribJisKatakana(BYTE Code);
+
+//	ARIB の色表 (128 色)。色番号は「色配列 * 16 + 番号」。
+//
+//	**背景は半透明の黒。**放送は色配列 4 を選び背景に 1 番を使うので、
+//	索引 65 = (0, 0, 0, α128) になる。字幕の背景が黒い箱に見えるのは
+//	この為で、TVCaptionMod2 の「背景の不透明度」もこのアルファを触る。
+struct TSMemoryAribColor {
+	BYTE R, G, B, A;
+};
+
+//	範囲の外なら透明 (A = 0) を返す
+TSMemoryAribColor TSMemoryAribClut(int Index);

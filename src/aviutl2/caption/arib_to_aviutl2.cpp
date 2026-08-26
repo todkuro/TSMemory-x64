@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "arib_to_aviutl2.h"
+#include "arib_gaiji.h"
 
 namespace {
 
@@ -38,32 +39,28 @@ void AppendHex(std::wstring *pOut, DWORD Rgb)
 
 bool AribColorIsKnown(int Index)
 {
-	return Index >= 0 && Index < 16;
+	//	**透明 (アルファ 0) は「色が無い」。**
+	//	背景の既定は 8 番 = 透明なので、これを黒として出すと
+	//	何も無い所に黒が付く
+	return Index >= 0 && Index < 128 && ::TSMemoryAribClut(Index).A != 0;
+}
+
+
+int AribColorAlpha(int Index)
+{
+	return ::TSMemoryAribClut(Index).A;
 }
 
 
 DWORD AribColorToRgb(int Index)
 {
-	//	既定の CLUT の前半 8 色。後半 8 色は半輝度
-	static const DWORD Base[8] = {
-		0x000000,	// 0 黒
-		0xFF0000,	// 1 赤
-		0x00FF00,	// 2 緑
-		0xFFFF00,	// 3 黄
-		0x0000FF,	// 4 青
-		0xFF00FF,	// 5 マゼンタ
-		0x00FFFF,	// 6 シアン
-		0xFFFFFF,	// 7 白
-	};
-
-	if (Index < 0)
-		Index = 0;
-	const DWORD c = Base[Index & 7];
-	if ((Index & 8) == 0)
-		return c;
-
-	//	半輝度
-	return ((c >> 1) & 0x7F7F7F);
+	//	**ARIB の 128 色表そのまま。**
+	//	以前は既定の 16 色だけを持っていた為、放送が使う色配列 4 の
+	//	背景色 (索引 65 = 半透明の黒) を「判らない色」として捨てていた
+	const TSMemoryAribColor c = ::TSMemoryAribClut(Index);
+	return (static_cast<DWORD>(c.R) << 16)
+		 | (static_cast<DWORD>(c.G) << 8)
+		 |  static_cast<DWORD>(c.B);
 }
 
 

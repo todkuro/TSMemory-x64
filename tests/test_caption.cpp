@@ -255,8 +255,17 @@ void RunUnitTests()
 			  Colors == 0);
 		check("the colour index is taken within the selected map",
 			  Backs == 4 * 16 + 1);
-		check("colours outside the default map are reported as unknown",
-			  !AribColorIsKnown(Backs) && AribColorIsKnown(7));
+		//	**索引 65 は半透明の黒。**これが字幕の背景の正体で、
+		//	以前は「判らない色」として捨てていた
+		check("the background colour is the translucent black",
+			  AribColorIsKnown(Backs) && AribColorToRgb(Backs) == 0x000000
+			  && AribColorAlpha(Backs) == 128);
+
+		//	背景の既定 (8 番) は透明。黒として出すと何も無い所に黒が付く
+		check("the default background is transparent",
+			  !AribColorIsKnown(8) && AribColorAlpha(8) == 0);
+		check("an opaque colour is reported as known",
+			  AribColorIsKnown(7) && AribColorAlpha(7) == 255);
 	}
 
 	//	4. CSI (可変長)。位置指定等がテキストを飲み込まない事

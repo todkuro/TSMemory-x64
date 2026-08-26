@@ -172,6 +172,11 @@ clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_com
 	-I"$ROOT/src/tvtp" -I"$ROOT/sdk/aviutl2" -I"$ROOT/src/common" -I"$ROOT/tests" \
 	-o "$BUILD/tests/test_multich.exe" "$ROOT/tests/test_multich.cpp" \
 	"${BONTS_OBJS[@]}" -luser32
+#	字幕 (ARIB STD-B24 の 8 単位符号)
+clang++ -O1 -static -std=c++17 -fms-extensions \
+	-I"$ROOT/src/aviutl2/caption" \
+	-o "$BUILD/tests/test_caption.exe" "$ROOT/tests/test_caption.cpp" \
+	"$ROOT/src/aviutl2/caption/arib_text.cpp" -luser32
 # -static: 起動時に libunwind.dll 等を探しに行かないようにする
 clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_compat.h" \
 	-I"$ROOT/sdk/aviutl2" -I"$ROOT/src/common" -I"$ROOT/tests" \
@@ -209,6 +214,11 @@ for TS in "${TS_LIST[@]}"; do
 	echo
 	echo "=== test_fuzz [$NAME] ==="
 	(cd "$BUILD/tests" && ./test_fuzz.exe "$TS" "$ROOT/dist/TSMemory-TVTestSrc.aux2" 6)
+
+	#	字幕。字幕を持たない TS では test_caption 側が skip する
+	echo
+	echo "=== test_caption [$NAME] ==="
+	"$BUILD/tests/test_caption.exe" "$TS"
 
 	#	サービスが 1 つしかない TS では test_multich 側が skip する
 	echo

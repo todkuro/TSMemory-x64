@@ -202,6 +202,7 @@ class CTSMemory : public TVTest::CTVTestPlugin, public CMediaDecoder
 	TCHAR m_szTempDir[MAX_PATH];	// スナップショットを置くフォルダ
 	bool m_fCloseAviUtl;
 	bool m_fAudio;			// 音声も溜め込むか ([Settings] Audio)
+	bool m_fSubtitle;		// 字幕も溜め込むか ([Settings] Subtitle)
 	int m_SnapshotCount;
 	int m_LaunchWaitSeconds;
 
@@ -261,6 +262,7 @@ CTSMemory::CTSMemory()
 	, m_hFileMapping(nullptr)
 	, m_fCloseAviUtl(false)
 	, m_fAudio(false)
+	, m_fSubtitle(false)
 	, m_SnapshotCount(DEFAULT_SNAPSHOT_COUNT)
 	, m_LaunchWaitSeconds(30)
 	, m_TargetServiceID(0)
@@ -337,6 +339,7 @@ bool CTSMemory::Initialize()
 	//	音声も溜め込むか。既定は映像のみ (従来どおり)。
 	//	AviUtl2 側の [M2V] audio と揃えて使う。
 	m_fAudio = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Audio"), 0, m_szIniFileName) != 0;
+	m_fSubtitle = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Subtitle"), 0, m_szIniFileName) != 0;
 
 	m_SnapshotCount = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("SnapshotCount"),
 											 DEFAULT_SNAPSHOT_COUNT, m_szIniFileName);
@@ -531,6 +534,11 @@ DWORD CTSMemory::GetTargetStreams() const
 
 	if (m_fAudio)
 		Streams |= CTsSelector::STREAM_AAC;
+
+	//	字幕 (stream_type 0x06)。**AviUtl2 側だけを 1 にしても届かない。**
+	//	ここで落とすと後段で何をしても取り返せない
+	if (m_fSubtitle)
+		Streams |= CTsSelector::STREAM_SUBTITLE;
 
 	return Streams;
 }

@@ -127,6 +127,14 @@ std::vector<BYTE> MakePmt(WORD ServiceID, WORD VideoPID, WORD AudioPID)
 	s.push_back(static_cast<BYTE>(AudioPID));
 	s.push_back(0xF0); s.push_back(0x00);					// ES_info_length
 
+	//	字幕 (stream_type 0x06)。component_tag 0x30 で「字幕」と判る
+	const WORD CaptionPID = static_cast<WORD>(VideoPID + 3);
+	s.push_back(0x06);
+	s.push_back(0xE0 | static_cast<BYTE>(CaptionPID >> 8));
+	s.push_back(static_cast<BYTE>(CaptionPID));
+	s.push_back(0xF0); s.push_back(0x03);					// ES_info_length
+	s.push_back(0x52); s.push_back(0x01); s.push_back(0x30);	// stream_identifier
+
 	s[2] = static_cast<BYTE>(s.size() - 3 + 4);
 	return s;
 }
@@ -223,6 +231,8 @@ std::vector<BYTE> BuildStream()
 			//	中身は何でもよい。PID が残るかどうかだけを見る
 			AppendVideo(&Ts, AUDIO_PID_1, i, 0x33);
 			AppendVideo(&Ts, AUDIO_PID_2, i, 0x44);
+			AppendVideo(&Ts, static_cast<WORD>(VIDEO_PID_1 + 3), i, 0x55);
+			AppendVideo(&Ts, static_cast<WORD>(VIDEO_PID_2 + 3), i, 0x66);
 		}
 	}
 	return Ts;
@@ -316,6 +326,33 @@ int main()
 		Feed(&Selector, Ts);
 
 		check("audio off: the audio PID is dropped", Sink.PidCount[AUDIO_PID_1] == 0);
+	}
+
+	//	--- 字幕 (stream_type 0x06) -------------------------------------------
+	//	**TVTest 側で落とすと後段で何をしても取り返せない。**
+	//	AviUtl2 側だけを有効にしても字幕は届かない
+	{
+		const WORD CAPTION_PID_1 = static_cast<WORD>(VIDEO_PID_1 + 3);
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_1,
+										CTsSelector::STREAM_MPEG2VIDEO
+										| CTsSelector::STREAM_SUBTITLE);
+			Feed(&Selector, Ts);
+			check("subtitle: the caption PID is kept when asked",
+				  Sink.PidCount[CAPTION_PID_1] > 0);
+		}
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_1, CTsSelector::STREAM_MPEG2VIDEO);
+			Feed(&Selector, Ts);
+			check("subtitle: it is dropped when not asked",
+				  Sink.PidCount[CAPTION_PID_1] == 0);
+		}
 	}
 
 	std::printf("\n%s (%d failure%s)\n", g_failures == 0 ? "PASS" : "FAIL",

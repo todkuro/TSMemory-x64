@@ -3,6 +3,7 @@
 //----------------------------------------------------------------------------
 #include <windows.h>
 #include <cwchar>
+#include <shlwapi.h>
 
 //	StringCchPrintfW を使う。lstrcpynW 等は引き続き使うので非推奨化はしない
 #define STRSAFE_NO_DEPRECATE
@@ -13,6 +14,8 @@
 
 #include "tsmemory_ipc.h"
 #include "bridge.h"
+#include "ts_caption.h"
+#include "drcs_font.h"
 #include "exitguard.h"
 #include "inifile.h"
 #include "plugin_main.h"
@@ -38,7 +41,14 @@ struct BridgeState {
 	bool ReplaceLayer = true;	// 配置先レイヤーの既存オブジェクトを消すか
 	bool Activate = true;		// 読み込み時にウィンドウを手前に出すか
 	bool LockLayer = false;		// 配置後に配置先レイヤーをロックするか
-	bool SeekToEnd = false;		// 配置後にシーク位置を取り込んだ映像の末尾にするか
+	bool SeekToEnd = false;
+
+	//	字幕 (src/aviutl2/caption/)。既定は無効
+	bool CaptionEnable = false;
+	int CaptionLayer = 1;                 // 映像とは別のレイヤー (0 起点)
+	std::wstring CaptionPreset;           // 本文の先頭に入れる <$...>
+	std::wstring CaptionDrcsFont = L"TSMemory DRCS";
+	bool CaptionBroadcastColor = true;		// 配置後にシーク位置を取り込んだ映像の末尾にするか
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
 	int ReadyTimeout = 30000;	// 初期化完了の通知が来ない場合の打ち切り (ms)
 
@@ -76,6 +86,125 @@ void ActivateWindow(HWND hwnd)
 	::AttachThreadInput(::GetCurrentThreadId(), ThreadID, TRUE);
 	::SetForegroundWindow(hwnd);
 	::AttachThreadInput(::GetCurrentThreadId(), ThreadID, FALSE);
+}
+
+//	字幕をタイムラインに置く。
+//
+//	**映像とは別のレイヤーに、字幕ごとに 1 つのテキストオブジェクトを作る。**
+//	書体は本文の先頭に入れた <$プリセット名> が決めるので、利用者は
+//	AviUtl2 側でそのプリセットを 1 つ直せば全ての字幕に効く
+//	(タイムライン上で個別に触らなくてよい)。
+void PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
+				   const OBJECT_LAYER_FRAME &Video)
+{
+	if (!g_State.CaptionEnable)
+		return;
+
+	//	共有メモリ名は .tvtv のファイル名部分だけ (m2v と同じ規約)
+	char szName[MAX_PATH];
+	if (::WideCharToMultiByte(CP_ACP, 0, ::PathFindFileNameW(pszFile), -1,
+							  szName, MAX_PATH, nullptr, nullptr) <= 0)
+		return;
+
+	AribToAviUtl2Options opt;
+	opt.Preset = g_State.CaptionPreset;
+	opt.DrcsFont = g_State.CaptionDrcsFont;
+	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
+
+	CTSCaptionSource Source;
+	if (!Source.Open(szName, opt)) {
+		WCHAR sz[192];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 字幕を取り込めませんでした : %s",
+						   Source.GetLastError());
+		LogWarn(sz);
+		return;
+	}
+
+	//	外字のフォントを本体に登録する。
+	//	メモリ上のまま渡せるのでファイルは作らない
+	if (!Source.GetFont().empty()) {
+		TSMemoryRegisterFontCollection(Source.GetFont().data(),
+									   Source.GetFont().size());
+	}
+
+	const int Layer = g_State.CaptionLayer;
+	const double Rate = (edit->info != nullptr && edit->info->scale > 0)
+						? static_cast<double>(edit->info->rate) / edit->info->scale : 0.0;
+
+	//	配置先レイヤーを空けてから置く
+	for (int i = 0; i < 1024; i++) {
+		OBJECT_HANDLE o = edit->find_object(Layer, 0);
+		if (o == nullptr)
+			break;
+		edit->delete_object(o);
+	}
+
+	int Placed = 0;
+	for (int i = 0; i < Source.GetCount(); i++) {
+		const TSMemoryCaption &c = Source.Get(i);
+		if (c.Text.empty())
+			continue;
+
+		//	映像の先頭からの秒数をフレーム番号に直す。
+		//	判らない物は置かない (どこに出せばよいか決められない)
+		if (c.Seconds < 0.0 || Rate <= 0.0)
+			continue;
+		int Start = Video.start + static_cast<int>(c.Seconds * Rate + 0.5);
+		if (Start < Video.start)
+			Start = Video.start;
+		if (Start > Video.end)
+			continue;
+
+		//	次の字幕までを表示の長さにする。最後の 1 つは映像の末尾まで
+		int End = Video.end;
+		for (int k = i + 1; k < Source.GetCount(); k++) {
+			if (Source.Get(k).Seconds > c.Seconds) {
+				End = Video.start
+					+ static_cast<int>(Source.Get(k).Seconds * Rate + 0.5) - 1;
+				break;
+			}
+		}
+		if (End > Video.end)
+			End = Video.end;
+		if (End < Start)
+			End = Start;
+
+		OBJECT_HANDLE o = edit->create_object(L"テキスト", Layer, Start,
+											  End - Start + 1);
+		if (o == nullptr)
+			continue;
+
+		//	設定値は UTF-8 で渡す
+		const int n = ::WideCharToMultiByte(CP_UTF8, 0, c.Text.c_str(), -1,
+											nullptr, 0, nullptr, nullptr);
+		if (n > 0) {
+			std::vector<char> u8(n);
+			::WideCharToMultiByte(CP_UTF8, 0, c.Text.c_str(), -1,
+								  u8.data(), n, nullptr, nullptr);
+			edit->set_object_item_value(o, L"テキスト", L"テキスト", u8.data());
+		}
+		Placed++;
+	}
+
+	WCHAR sz[224];
+	::StringCchPrintfW(sz, ARRAYSIZE(sz),
+					   L"TSMemory: 字幕を %d 件配置しました (レイヤー %d"
+					   L"%s%d 字形)",
+					   Placed, Layer + 1,
+					   L" / 外字 ", Source.GetGlyphCount());
+	Log(sz);
+
+	if (Source.GetMissingGlyphCount() > 0) {
+		//	**字形の定義がリングバッファの窓より前にあると起こる。**
+		//	再送間隔は実測で中央値 14 秒、最大 210 秒あり、既定の
+		//	MemorySize=10 (8〜14 秒) では拾えない事がある
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 外字 %d 個は字形が届いていません "
+						   L"(MemorySize を大きくすると拾えます)",
+						   Source.GetMissingGlyphCount());
+		LogWarn(sz);
+	}
 }
 
 //	編集セクション内での実処理
@@ -177,6 +306,9 @@ void ProcEdit(void *param, EDIT_SECTION *edit)
 					lf.layer + 1, lf.start + 1, lf.end + 1, Cursor + 1);
 		Log(szMessage);
 	}
+
+	//	字幕を置く。映像とは別のレイヤーに、時間に合わせて並べる
+	PlaceCaptions(edit, pszFile, lf);
 
 	//	プレビュー上での誤操作を防ぐ為に配置先レイヤーをロックする。
 	//
@@ -341,6 +473,26 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 	g_State.Activate = GetIniInt(ini_file, L"Activate", 1) != 0;
 	g_State.LockLayer = GetIniInt(ini_file, L"LockLayer", 0) != 0;
 	g_State.SeekToEnd = GetIniInt(ini_file, L"SeekToEnd", 0) != 0;
+
+	//	字幕。書体は <$プリセット名> が決めるので、利用者は AviUtl2 側で
+	//	そのテキストプリセットを 1 つ直せば全ての字幕に効く
+	{
+		g_State.CaptionEnable =
+			::GetPrivateProfileIntW(L"Caption", L"Enable", 0, ini_file) != 0;
+		g_State.CaptionLayer =
+			::GetPrivateProfileIntW(L"Caption", L"Layer", 2, ini_file) - 1;
+		if (g_State.CaptionLayer < 0)
+			g_State.CaptionLayer = 0;
+		g_State.CaptionBroadcastColor =
+			::GetPrivateProfileIntW(L"Caption", L"UseBroadcastColor", 1, ini_file) != 0;
+
+		WCHAR sz[128];
+		TSMemoryGetIniString(ini_file, L"Caption", L"Preset", L"", sz, ARRAYSIZE(sz));
+		g_State.CaptionPreset = sz;
+		TSMemoryGetIniString(ini_file, L"Caption", L"DrcsFont", L"TSMemory DRCS",
+							 sz, ARRAYSIZE(sz));
+		g_State.CaptionDrcsFont = sz;
+	}
 	//	時間の設定は秒 (小数可) で指定する
 	g_State.ReadyDelay = GetIniMilliseconds(ini_file, L"ReadyDelay", 0.5, 0.0, 10.0);
 	g_State.ReadyTimeout = GetIniMilliseconds(ini_file, L"ReadyTimeout", 30.0, 1.0, 600.0);

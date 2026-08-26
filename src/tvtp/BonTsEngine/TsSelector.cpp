@@ -257,7 +257,17 @@ void CALLBACK CTsSelector::OnPmtUpdated(const WORD wPID, CTsPidMapTarget *pMapTa
 
 	// ESのPID追加
 	PIDInfo.EsPIDs.clear();
-	static const BYTE StreamTypeList [] = { 0x01, 0x02, 0x06, 0x0D, 0x0F, 0x1B };
+	//	**並び順が TsSelector.h の STREAM_* のビット位置に対応する。**
+	//	下の bTarget が (1 << j) で判定している為、並べ替えると全ての指定が
+	//	ずれる。追加は必ず末尾に足す事 (数値順に並べ直さない)。
+	//
+	//	  index : 0     1     2     3     4     5     6     7     8
+	//	  値    : 0x01  0x02  0x06  0x0D  0x0F  0x1B  0x24  0x11  0x1C
+	//
+	//	0x24 / 0x11 / 0x1C は本リポジトリでの追加。
+	static const BYTE StreamTypeList [] = {
+		0x01, 0x02, 0x06, 0x0D, 0x0F, 0x1B, 0x24, 0x11, 0x1C
+	};
 	for (WORD i = 0 ; i < pPmtTable->GetEsInfoNum() ; i++) {
 		bool bTarget = false;
 		BYTE StreamType = pPmtTable->GetStreamTypeID(i);

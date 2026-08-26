@@ -22,6 +22,7 @@
 #include "bridge.h"
 #include "capture.h"
 #include "exitguard.h"
+#include "drcs_font.h"
 
 //	版は CHANGELOG.md が唯一の正で、tools/build.sh が
 //	build/generated/tsmemory_version.h を作って渡す。
@@ -206,4 +207,17 @@ EXTERN_C __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE *host)
 
 	//	終了時の保存確認の自動応答 (既定では無効)
 	TSMemoryExitGuardStart(host, g_pLogger, g_szIniFileName);
+
+	//	外字 (DRCS) をフォントとして渡せるかの検証。
+	//	字幕対応の可否がここに掛かっている為、実機で確かめられるようにする。
+	//	  [Caption]
+	//	  FontProbe=<フォントファイルのパス>
+	TSMemoryFontSetHost(host, g_pEdit);
+	{
+		WCHAR szFont[MAX_PATH] = {};
+		::GetPrivateProfileStringW(L"Caption", L"FontProbe", L"", szFont,
+								   ARRAYSIZE(szFont), g_szIniFileName);
+		if (szFont[0] != L'\0')
+			TSMemoryFontProbe(szFont);
+	}
 }

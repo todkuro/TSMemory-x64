@@ -125,7 +125,7 @@ done
 # 2. AviUtl ExEdit2 側プラグイン
 #---------------------------------------------------------------------------
 echo "[2/4] TSMemory-TVTestSrc.aux2"
-AUX2_INC="-I$BUILD/generated -I$ROOT/src/m2v -I$ROOT/sdk/aviutl2 -I$ROOT/src/common -I$ROOT/src/aviutl2 -I$ROOT/src/aviutl2/audio"
+AUX2_INC="-I$BUILD/generated -I$ROOT/src/m2v -I$ROOT/sdk/aviutl2 -I$ROOT/src/common -I$ROOT/src/aviutl2 -I$ROOT/src/aviutl2/audio -I$ROOT/src/aviutl2/caption"
 for b in input_tvtv bridge capture exitguard preset inifile plugin_main; do
 	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
 		-o "$BUILD/aviutl2/$b.o" "$ROOT/src/aviutl2/$b.cpp"
@@ -139,14 +139,23 @@ for b in ts_audio aac_decoder tvtv_audio; do
 		-o "$BUILD/aviutl2/audio/$b.o" "$ROOT/src/aviutl2/audio/$b.cpp"
 done
 
+#	字幕 (src/aviutl2/caption/)。音声と同じく既存のコードとは分けてある
+mkdir -p "$BUILD/aviutl2/caption"
+for b in drcs_font; do
+	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
+		-o "$BUILD/aviutl2/caption/$b.o" "$ROOT/src/aviutl2/caption/$b.cpp"
+done
+
 $RC -I "$ROOT/src/m2v" -o "$BUILD/aviutl2/tsmemory_rc.o" "$ROOT/src/aviutl2/tsmemory.rc"
 
 #	-lmfplat -lmfuuid は音声 (Media Foundation の AAC デコーダ) 用
+#	-ldwrite は字幕の外字 (DRCS) をフォントとして渡す為
 $CXX -shared -O2 -static -o "$DIST/TSMemory-TVTestSrc.aux2" \
 	"$BUILD"/m2v/*.o "$BUILD"/aviutl2/*.o "$BUILD"/aviutl2/audio/*.o \
+	"$BUILD"/aviutl2/caption/*.o \
 	-Wl,--error-limit=0 \
 	-lshlwapi -lcomctl32 -lgdi32 -luser32 -lole32 -loleaut32 -lwindowscodecs -luuid \
-	-lmfplat -lmfuuid
+	-lmfplat -lmfuuid -ldwrite
 
 #---------------------------------------------------------------------------
 # 3. TVTest プラグイン

@@ -99,6 +99,16 @@ clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_com
 	"${BONTS_OBJS[@]}" -luser32
 "$BUILD/tests/test_selector.exe"
 
+#	外字 (DRCS) から組み立てた TTF が DirectWrite に通るか。
+#	自前でフォントを作る以上、「壊れていない」の判定は本物に読ませて行う。
+echo
+echo "=== test_drcs_ttf ==="
+clang++ -O1 -static -municode -std=c++17 -fms-extensions \
+	-I"$ROOT/src/aviutl2/caption" \
+	-o "$BUILD/tests/test_drcs_ttf.exe" "$ROOT/tests/test_drcs_ttf.cpp" \
+	"$ROOT/src/aviutl2/caption/drcs_ttf.cpp" -ldwrite -lole32
+"$BUILD/tests/test_drcs_ttf.exe" "$BUILD/tests/drcs.ttf"
+
 #	TVTest 側のプラグインを TVTest 無しで動かす。
 #	TS サンプルが無ければ「実際に溜める」確認だけを飛ばして通る。
 echo

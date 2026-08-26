@@ -141,7 +141,7 @@ done
 
 #	字幕 (src/aviutl2/caption/)。音声と同じく既存のコードとは分けてある
 mkdir -p "$BUILD/aviutl2/caption"
-for b in drcs_font; do
+for b in drcs_font drcs_ttf; do
 	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
 		-o "$BUILD/aviutl2/caption/$b.o" "$ROOT/src/aviutl2/caption/$b.cpp"
 done

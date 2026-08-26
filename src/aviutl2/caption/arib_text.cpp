@@ -115,6 +115,7 @@ struct State {
 	int Single = -1;	// 単一シフト中なら G の番号
 };
 
+
 //	CSI の引数は 0x30-0x39 と 0x3B が続き、0x20 + 終端バイトで終わる
 size_t SkipCsi(const BYTE *p, size_t Size, size_t i)
 {
@@ -148,6 +149,31 @@ void PushSimple(std::vector<AribItem> *pOut, AribItemType Type, int A = 0, int B
 	it.A = A;
 	it.B = B;
 	pOut->push_back(it);
+}
+
+//	色の指定を読む。**上位ニブルが前景と背景を分ける。**
+//	  0x40+n … 前景色 / 0x50+n … 背景色 / 0x60,0x70 … 半透過
+//	区別せず全部を前景色として扱うと、背景色が文字色を上書きしてしまう
+//	(実測でも `90 20 44` = 前景 4、`90 51` = 背景 1 と並んでいた)。
+size_t PushColor(std::vector<AribItem> *pOut, const BYTE *pData, size_t Size, size_t i)
+{
+	if (i >= Size)
+		return i;
+
+	//	0x20 が続く形は「色マップの指定 + 値」の 2 バイト
+	if (pData[i] == 0x20) {
+		if (i + 1 >= Size)
+			return Size;
+		const BYTE v = pData[i + 1];
+		if ((v & 0xF0) == 0x40)
+			PushSimple(pOut, AribItemType::Color, v & 0x0F);
+		return i + 2;
+	}
+
+	const BYTE v = pData[i];
+	if ((v & 0xF0) == 0x40 || v < 0x10)
+		PushSimple(pOut, AribItemType::Color, v & 0x0F);
+	return i + 1;
 }
 
 }	// namespace
@@ -243,13 +269,8 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 					PushSimple(pOut, AribItemType::Size, pData[i] == 0x41 ? 3 : 0);
 				i++;
 				break;
-			case 0x8C:	// COL (1 か 2)
-				if (i < Size && pData[i] == 0x20) {
-					i += 2;						// 背景色等はここでは扱わない
-				} else if (i < Size) {
-					PushSimple(pOut, AribItemType::Color, pData[i] & 0x0F);
-					i++;
-				}
+			case 0x8C:	// COL
+				i = PushColor(pOut, pData, Size, i);
 				break;
 			case 0x90:
 				//	**実データに合わせている。**
@@ -257,14 +278,7 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 				//	「0x20 が続けば 2 バイト、そうでなければ 1 バイト」の形。
 				//	1 バイト固定で読むと次の文字とずれ、以降が全て化ける。
 				//	続く値も 0x40+n / 0x50+n と色指定の並びになっている
-				if (i < Size && pData[i] == 0x20) {
-					if (i + 1 < Size)
-						PushSimple(pOut, AribItemType::Color, pData[i + 1] & 0x0F);
-					i += 2;
-				} else if (i < Size) {
-					PushSimple(pOut, AribItemType::Color, pData[i] & 0x0F);
-					i++;
-				}
+				i = PushColor(pOut, pData, Size, i);
 				break;
 
 			case 0x8D: case 0x8E: case 0x8F:	// FLC / CDC / POL

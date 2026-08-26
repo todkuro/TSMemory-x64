@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "arib_text.h"
+#include "arib_to_aviutl2.h"
 
 namespace {
 
@@ -298,6 +299,98 @@ void RunUnitTests()
 	std::printf("\n");
 }
 
+//	AviUtl2 のテキストへの変換
+void RunConvertTests()
+{
+	std::printf("=== AviUtl2 のテキストへの変換 ===\n");
+
+	AribToAviUtl2Options opt;
+	opt.Preset = L"字幕";
+	opt.DrcsFont = L"TSMemoryDRCS";
+
+	//	1. プリセットが先頭に入る (書体を一括で変える為の要)
+	{
+		std::vector<AribItem> Items;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(t);
+		std::vector<int> Drcs;
+		check("the preset is emitted first",
+			  AribItemsToAviUtl2(Items, opt, &Drcs) == L"<$字幕>あ");
+	}
+
+	//	2. 色。同じ色が続く時は繰り返さない
+	{
+		std::vector<AribItem> Items;
+		AribItem c; c.Type = AribItemType::Color; c.A = 7;	// 白
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(c); Items.push_back(t);
+		Items.push_back(c); Items.push_back(t);			// 同じ色をもう一度
+		std::vector<int> Drcs;
+		check("colour becomes a control character and is not repeated",
+			  AribItemsToAviUtl2(Items, opt, &Drcs) == L"<$字幕><#ffffff>ああ");
+	}
+
+	//	3. 放送の色を使わない設定
+	{
+		std::vector<AribItem> Items;
+		AribItem c; c.Type = AribItemType::Color; c.A = 1;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(c); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("the broadcast colour can be turned off",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>あ");
+	}
+
+	//	4. 外字。1 文字だけフォントを切り替え、本文の書体は保つ
+	{
+		std::vector<AribItem> Items;
+		AribItem d; d.Type = AribItemType::Drcs; d.A = 0x4121;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		Items.push_back(d); Items.push_back(t); Items.push_back(d);
+		std::vector<int> Drcs;
+		const std::wstring s = AribItemsToAviUtl2(Items, opt, &Drcs);
+		check("a DRCS switches font for one character only",
+			  s == L"<$字幕><@TSMemoryDRCS><@>あ<@TSMemoryDRCS><@>");
+		check("the same glyph gets the same code", Drcs.size() == 1);
+	}
+
+	//	5. 外字用フォントが無ければ代替文字
+	{
+		std::vector<AribItem> Items;
+		AribItem d; d.Type = AribItemType::Drcs; d.A = 0x4121;
+		Items.push_back(d);
+		AribToAviUtl2Options o2 = opt;
+		o2.DrcsFont.clear();
+		std::vector<int> Drcs;
+		check("without a DRCS font a placeholder is used",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>〓");
+	}
+
+	//	6. **本文の '<' を打ち消す。**
+	//	   字幕には「<笑い>」のような表記が実際に出てくる
+	{
+		std::vector<AribItem> Items;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"<笑い>";
+		Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.Preset.clear();
+		std::vector<int> Drcs;
+		check("'<' in the text is escaped",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<<笑い>");
+	}
+
+	//	7. 色の対応
+	{
+		check("colour 7 is white", AribColorToRgb(7) == 0xFFFFFF);
+		check("colour 0 is black", AribColorToRgb(0) == 0x000000);
+		check("colour 3 is yellow", AribColorToRgb(3) == 0xFFFF00);
+	}
+
+	std::printf("\n");
+}
+
 }	// namespace
 
 
@@ -306,6 +399,7 @@ int main(int argc, char **argv)
 	std::setvbuf(stdout, nullptr, _IONBF, 0);
 
 	RunUnitTests();
+	RunConvertTests();
 
 	const char *pszPath = argc > 1 ? argv[1] : nullptr;
 	const bool fDump = argc > 2 && std::strcmp(argv[2], "--dump") == 0;
@@ -405,7 +499,7 @@ int main(int argc, char **argv)
 	//	--- 復号 -------------------------------------------------------------
 	int Decoded = 0, WithText = 0, DrcsRefs = 0, Positions = 0, Colors = 0;
 	size_t TotalChars = 0;
-	std::vector<std::wstring> Samples;
+	std::vector<std::wstring> Samples, Converted;
 
 	for (const CaptionUnit &u : Units) {
 		if (u.Parameter != 0x20)
@@ -428,8 +522,15 @@ int main(int argc, char **argv)
 		if (fHasChar) {
 			WithText++;
 			TotalChars += s.size();
-			if (Samples.size() < 12)
+			if (Samples.size() < 12) {
 				Samples.push_back(s);
+				//	AviUtl2 のテキストに直した形も見る
+				AribToAviUtl2Options opt;
+				opt.Preset = L"字幕";
+				opt.DrcsFont = L"TSMemoryDRCS";
+				std::vector<int> Codes;
+				Converted.push_back(AribItemsToAviUtl2(Items, opt, &Codes));
+			}
 		}
 	}
 
@@ -456,7 +557,8 @@ int main(int argc, char **argv)
 	check("the text contains Japanese characters", fJapanese);
 
 	std::printf("--- 復号した字幕 (先頭 %zu 件) ---\n", Samples.size());
-	for (const std::wstring &s : Samples) {
+	for (size_t k = 0; k < Samples.size(); k++) {
+		const std::wstring &s = k < Converted.size() ? Converted[k] : Samples[k];
 		//	端末に出す為 UTF-8 に直す
 		const int n = ::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
 		std::vector<char> u8(n > 0 ? n : 1);

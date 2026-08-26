@@ -1830,6 +1830,27 @@ C++ 例外なので無視して構いません)。
 
 ---
 
+## dist/ の ini は毎回入れ直す
+
+プラグインは**自分と同じ場所の ini** を読む
+(`src/aviutl2/plugin_main.h`)。テストは `dist/TSMemory-TVTestSrc.aux2` を
+そのまま読み込む為、`dist/TSMemory-TVTestSrc.ini` が無いと既定値で、
+古いままだと**古い設定でテストが走る**。
+
+更に `[Capture]` の設定は終了時に `WritePrivateProfileStringW()` で
+書き戻される。この API は無ければファイルを作り、あれば該当キーだけ
+書き換える。その結果、放っておくと
+**「更新日時だけ新しくなって中身は古い」**ファイルが残る
+(`[Caption]` の節が丸ごと無い、等)。
+
+その為 `tools/build.sh` が毎回 `res/TSMemory-TVTestSrc.aux2.ini` を
+`dist/` に上書きする。**`dist/` の ini を手で直しても次のビルドで消える。**
+手で試したい設定は `build/plugin/` (`tests/tools/test-live.sh`) か、
+実際にインストールした先で変える事。
+
+配布物に入る ini は `build/package/` と `build/au2pkg/` 経由で
+zip に入る物で、こちらは元から `res/` の写しになっている。
+
 ## うまく取り込めない時の確認
 
 TVTest と AviUtl2 の両方のログに、取り込み量と配置結果が出力されます。

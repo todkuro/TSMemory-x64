@@ -28,6 +28,21 @@ def read_u32_array(path, name):
     return [int(v, 0) for v in re.findall(r"0[xX][0-9a-fA-F]+|\b\d+\b", body)]
 
 
+def read_macros(path):
+    """`inline constexpr uint8_t kDefaultMacros[][20] = { {..}, ... };` を読む"""
+    text = open(path, encoding="utf-8-sig").read()
+    m = re.search(r"kDefaultMacros\s*\[\s*\]\s*\[\s*\d+\s*\]\s*=\s*\{(.*?)\n\};",
+                  text, re.S)
+    if m is None:
+        raise SystemExit("マクロの表が見つかりません: %s" % path)
+    out = []
+    for row in re.findall(r"\{([^{}]*)\}", m.group(1)):
+        out.append([int(v, 0) for v in re.findall(r"0[xX][0-9a-fA-F]+", row)])
+    if len(out) != 16:
+        raise SystemExit("マクロが 16 個ではありません: %d" % len(out))
+    return out
+
+
 #	未定義の区点はこの値で埋まっている (0 ではない)
 REPLACEMENT = 0xFFFD
 
@@ -49,8 +64,23 @@ def main():
 
     gaiji_h = src + "/src/decoder/b24_gaiji_table.hpp"
     conv_h = src + "/src/decoder/b24_conv_tables.hpp"
+    macro_h = src + "/src/decoder/b24_macros.hpp"
 
+    macros = read_macros(macro_h)
     kanji = read_u32_array(conv_h, "kKanjiTable")
+
+    #	1 バイトの文字集合。**区 4 / 区 5 で代用してはいけない。**
+    #	末尾に「ー」「、」等が入っており、区で引くと落ちる
+    singles = [
+        ("Alnum", "kAlphanumericTable_Fullwidth"),
+        ("Hiragana", "kHiraganaTable"),
+        ("Katakana", "kKatakanaTable"),
+        ("JisKatakana", "kJISX0201KatakanaTable"),
+    ]
+    single_tables = [(name, read_u32_array(conv_h, sym)) for name, sym in singles]
+    for name, v in single_tables:
+        if len(v) != 94:
+            raise SystemExit("%s が 94 個ではありません: %d" % (name, len(v)))
     gaiji = read_u32_array(gaiji_h, "kAdditionalSymbolsTable_Unicode")
 
     #	区 1-84 が kKanjiTable、区 85-94 が追加表。どちらも 94 点ずつ
@@ -117,6 +147,19 @@ def main():
     w("")
     w("//\t区点 (どちらも 1 起点) から 1 文字を得る。無ければ空を返す")
     w("const WCHAR *TSMemoryAribKuTen(int Ku, int Ten, int *pLength);")
+    w("")
+    w("//\t既定のマクロ (0x60-0x6F の 0-15) の中身を得る。")
+    w("//\t**中身は文字集合を割り当てる ESC の並び**で、本文は入っていない。")
+    w("//\tG3 の初期値がマクロなので `SS3 0x61` のような形で普通に出て来る。")
+    w("const BYTE *TSMemoryAribDefaultMacro(int Index, int *pLength);")
+    w("")
+    w("//\t1 バイトの文字集合。符号 0x21-0x7E をそのまま渡す。")
+    w("//")
+    w("//\t**区 4 / 区 5 で代用してはいけない。**末尾に「ー」「、」等が")
+    w("//\t入っており、区で引くと落ちる (実測: ステーション -> ステション)。")
+    w("//\t英数は全角。中型 (MSZ) の時に半角相当の見た目になる")
+    for name, _ in singles:
+        w("WCHAR TSMemoryArib%s(BYTE Code);" % name)
 
     open(out, "w", encoding="utf-8", newline="\n").write("\n".join(lines) + "\n")
 
@@ -165,6 +208,53 @@ def main():
     w("\t\t*pLength = g_Length[Index];")
     w("\treturn &TSMemoryAribGaijiPool[g_Offset[Index]];")
     w("}")
+    w("")
+    w("")
+    w("//\t既定のマクロ 16 個")
+    w("namespace {")
+    w("")
+    for i, m in enumerate(macros):
+        w("const BYTE g_Macro%X[] = { %s };"
+          % (i, " ".join("0x%02X," % b for b in m)))
+    w("")
+    w("const BYTE * const g_Macros[16] = {")
+    w("\t" + " ".join("g_Macro%X," % i for i in range(16)))
+    w("};")
+    w("")
+    w("const int g_MacroLength[16] = {")
+    w("\t" + " ".join("%d," % len(m) for m in macros))
+    w("};")
+    w("")
+    w("}\t// namespace")
+    w("")
+    w("")
+    w("const BYTE *TSMemoryAribDefaultMacro(int Index, int *pLength)")
+    w("{")
+    w("\tif (pLength != nullptr)")
+    w("\t\t*pLength = 0;")
+    w("\tif (Index < 0 || Index > 15)")
+    w("\t\treturn nullptr;")
+    w("\tif (pLength != nullptr)")
+    w("\t\t*pLength = g_MacroLength[Index];")
+    w("\treturn g_Macros[Index];")
+    w("}")
+
+    for name, values in single_tables:
+        w("")
+        w("")
+        w("WCHAR TSMemoryArib%s(BYTE Code)" % name)
+        w("{")
+        w("\tstatic const WCHAR Table[94] = {")
+        for i in range(0, 94, 10):
+            w("\t\t" + " ".join(
+                "0x%04X," % (0 if v in (0, REPLACEMENT) or v >= 0x10000 else v)
+                for v in values[i:i + 10]))
+        w("\t};")
+        w("")
+        w("\tif (Code < 0x21 || Code > 0x7E)")
+        w("\t\treturn 0;")
+        w("\treturn Table[Code - 0x21];")
+        w("}")
 
     open(cpp, "w", encoding="utf-8", newline="\n").write("\n".join(lines) + "\n")
 

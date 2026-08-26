@@ -387,13 +387,27 @@ void RunUnitTests()
 		check("a DRCS reference is reported", fDrcs);
 	}
 
-	//	7. 英数 (GL を G1 に切り替える LS1)
+	//	7. 英数 (GL を G1 に切り替える LS1)。
+	//	   **英数は全角。**中型 (MSZ) の時に半角相当の見た目になるので、
+	//	   半角で出すと <tw50> と重なって細くなり過ぎる
 	{
 		const BYTE d[] = { 0x0E, 0x41, 0x42, 0x43 };
 		std::vector<AribItem> Items;
 		AribDecodeText(d, sizeof(d), &Items);
 		check("LS1 switches to the alphanumeric set",
-			  AribItemsToPlainText(Items) == L"ABC");
+			  AribItemsToPlainText(Items) == L"ＡＢＣ");
+	}
+
+	//	7b. **1 バイトの文字集合は区 4 / 区 5 では引けない。**
+	//	   末尾に「ー」等が入っており、区で引くと落ちる
+	//	   (実測: ステーション -> ステション)
+	{
+		//	LS1R で GR を G1 (カタカナ) にしてから 0xB9 0xC6 0xF9
+		//	= ス テ ー … ではなく、マクロ後の並びに合わせて直接引く
+		check("the katakana set has the prolonged sound mark",
+			  TSMemoryAribKatakana(0x79) == L'ー');
+		check("the hiragana set has the ideographic comma",
+			  TSMemoryAribHiragana(0x7D) == L'、');
 	}
 
 	//	8. 壊れた入力で落ちない事 (切り詰め・不正な区点)

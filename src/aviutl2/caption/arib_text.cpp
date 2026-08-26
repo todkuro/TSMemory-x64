@@ -50,10 +50,15 @@ CharSet FromFinal(BYTE F, bool fTwoByte)
 	}
 }
 
-//	ひらがな (区 4) / カタカナ (区 5) は JIS X 0208 の該当区に載っている。
-//	1 バイトの符号 0x21-0x73 が区の 1 点目から順に並ぶ
-const int KU_HIRAGANA = 4;
-const int KU_KATAKANA = 5;
+//	1 バイトの文字集合は arib_gaiji.h の表で引く。
+//	**区 4 / 区 5 で代用してはいけない。**末尾に「ー」「、」等が入っており、
+//	区で引くと落ちる (実測: ステーション -> ステション)
+std::wstring OneByteToText(WCHAR w)
+{
+	if (w == 0)
+		return std::wstring();
+	return std::wstring(1, w);
+}
 
 //	区点から 1 文字を得る。無ければ空を返す
 //	(呼び出し側で外字と同じ扱いにする)。
@@ -74,22 +79,15 @@ std::wstring KuTenToText(int Ku, int Ten)
 	return std::wstring(p, Length);
 }
 
-//	JIS X 0201 の片仮名 (半角)
-std::wstring JisKatakanaToText(BYTE b)
-{
-	const char c = static_cast<char>(b | 0x80);
-	WCHAR w[2] = {};
-	if (::MultiByteToWideChar(932, 0, &c, 1, w, 2) <= 0)
-		return std::wstring();
-	return std::wstring(w, 1);
-}
-
 //---------------------------------------------------------------------------
 //	復号の状態
 //---------------------------------------------------------------------------
 struct State {
+	//	**G3 の初期値はマクロ。**カタカナにしておくと
+	//	`SS3 0x61` (マクロ 1 の呼び出し) が「メ」という文字になる。
+	//	実測でも NHK の字幕が全て「メ」で始まっていた
 	CharSet G[4] = { CharSet::Kanji, CharSet::Alnum,
-					 CharSet::Hiragana, CharSet::Katakana };
+					 CharSet::Hiragana, CharSet::Macro };
 	int GL = 0;			// GL に呼び出している G の番号
 	int GR = 2;
 	int Single = -1;	// 単一シフト中なら G の番号
@@ -271,12 +269,32 @@ size_t PushColor(std::vector<AribItem> *pOut, const BYTE *pData, size_t Size,
 }	// namespace
 
 
+namespace {
+
+//	Depth はマクロの入れ子を止める為の物。
+//	既定のマクロは ESC の並びしか持たないので 1 段で足りるが、
+//	壊れたデータで無限に潜らないようにしておく
+void DecodeBody(const BYTE *pData, size_t Size, State &st,
+				std::vector<AribItem> *pOut, int Depth);
+
+}	// namespace
+
+
 void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 {
 	if (pData == nullptr || pOut == nullptr)
 		return;
 
 	State st;
+	DecodeBody(pData, Size, st, pOut, 0);
+}
+
+
+namespace {
+
+void DecodeBody(const BYTE *pData, size_t Size, State &st,
+				std::vector<AribItem> *pOut, int Depth)
+{
 
 	for (size_t i = 0; i < Size; ) {
 		const BYTE b = pData[i];
@@ -432,29 +450,40 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 
 		i++;
 		switch (Set) {
-		case CharSet::Alnum: {
-			//	英数は ASCII と同じ並び。全角にはしない
-			const WCHAR w[2] = { static_cast<WCHAR>(c1), 0 };
-			PushText(pOut, w);
+		case CharSet::Alnum:
+			//	**英数は全角。**中型 (MSZ) の時に半角相当の見た目になる
+			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)));
 			break;
-		}
 		case CharSet::Hiragana:
-			PushText(pOut, KuTenToText(KU_HIRAGANA, c1 - 0x20));
+			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)));
 			break;
 		case CharSet::Katakana:
-			PushText(pOut, KuTenToText(KU_KATAKANA, c1 - 0x20));
+			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)));
 			break;
 		case CharSet::JisKatakana:
-			PushText(pOut, JisKatakanaToText(c1));
+			PushText(pOut, OneByteToText(::TSMemoryAribJisKatakana(c1)));
 			break;
 		case CharSet::Drcs1:
 			PushSimple(pOut, AribItemType::Drcs, c1);
 			break;
+		case CharSet::Macro: {
+			//	**マクロは文字ではない。**中身は文字集合を割り当てる
+			//	ESC の並びなので、そのまま読ませて状態だけ変える
+			if (c1 < 0x60 || c1 > 0x6F || Depth >= 4)
+				break;
+			int Len = 0;
+			const BYTE *p = ::TSMemoryAribDefaultMacro(c1 & 0x0F, &Len);
+			if (p != nullptr && Len > 0)
+				DecodeBody(p, static_cast<size_t>(Len), st, pOut, Depth + 1);
+			break;
+		}
 		default:
 			break;
 		}
 	}
 }
+
+}	// namespace
 
 
 std::wstring AribItemsToPlainText(const std::vector<AribItem> &Items, LPCWSTR pszDrcs)

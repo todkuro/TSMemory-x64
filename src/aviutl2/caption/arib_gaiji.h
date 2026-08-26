@@ -31,3 +31,18 @@ extern const WCHAR TSMemoryAribGaijiPool[];
 
 //	区点 (どちらも 1 起点) から 1 文字を得る。無ければ空を返す
 const WCHAR *TSMemoryAribKuTen(int Ku, int Ten, int *pLength);
+
+//	既定のマクロ (0x60-0x6F の 0-15) の中身を得る。
+//	**中身は文字集合を割り当てる ESC の並び**で、本文は入っていない。
+//	G3 の初期値がマクロなので `SS3 0x61` のような形で普通に出て来る。
+const BYTE *TSMemoryAribDefaultMacro(int Index, int *pLength);
+
+//	1 バイトの文字集合。符号 0x21-0x7E をそのまま渡す。
+//
+//	**区 4 / 区 5 で代用してはいけない。**末尾に「ー」「、」等が
+//	入っており、区で引くと落ちる (実測: ステーション -> ステション)。
+//	英数は全角。中型 (MSZ) の時に半角相当の見た目になる
+WCHAR TSMemoryAribAlnum(BYTE Code);
+WCHAR TSMemoryAribHiragana(BYTE Code);
+WCHAR TSMemoryAribKatakana(BYTE Code);
+WCHAR TSMemoryAribJisKatakana(BYTE Code);

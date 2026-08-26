@@ -48,7 +48,7 @@ struct BridgeState {
 	int CaptionLayer = 1;                 // 映像とは別のレイヤー (0 起点)
 	std::wstring CaptionPreset;           // 本文の先頭に入れる <$...>
 	std::wstring CaptionDrcsFont = L"TSMemory DRCS";
-	bool CaptionBroadcastColor = true;		// 配置後にシーク位置を取り込んだ映像の末尾にするか
+	bool CaptionBroadcastColor = true;    // 放送の指定した色をそのまま使うか
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
 	int ReadyTimeout = 30000;	// 初期化完了の通知が来ない場合の打ち切り (ms)
 
@@ -94,17 +94,43 @@ void ActivateWindow(HWND hwnd)
 //	書体は本文の先頭に入れた <$プリセット名> が決めるので、利用者は
 //	AviUtl2 側でそのプリセットを 1 つ直せば全ての字幕に効く
 //	(タイムライン上で個別に触らなくてよい)。
-void PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
+//
+//	置いたら true を返す。呼び出し側はこれを見てロックを掛ける
+//	(何も置いていない空のレイヤーをロックしても紛らわしいだけな為)。
+bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				   const OBJECT_LAYER_FRAME &Video)
 {
 	if (!g_State.CaptionEnable)
-		return;
+		return false;
+
+	const int Layer = g_State.CaptionLayer;
+
+	//	**映像と同じレイヤーには置けない。**
+	//	下の掃除で、直前に置いた映像のオブジェクトごと消してしまう。
+	//	黙って消えると原因が判らない為、置かずに伝える
+	if (Layer == g_State.Layer) {
+		LogWarn(L"TSMemory: [Caption] Layer が [Bridge] Layer と同じです "
+				L"(字幕は置きません。別のレイヤーを指定してください)");
+		return false;
+	}
+
+	//	**ロックされたレイヤーにはオブジェクトを置けない。**
+	//	前回 LockLayer で掛けたものなら外す。手で掛けたものは
+	//	勝手に外さず、置けない事を伝えて諦める (映像側と同じ扱い)
+	if (edit->get_layer_lock(Layer)) {
+		if (!g_State.LockLayer) {
+			LogWarn(L"TSMemory: 字幕のレイヤーがロックされています "
+					L"(字幕は置きません。ロックを外してください)");
+			return false;
+		}
+		edit->set_layer_lock(Layer, false);
+	}
 
 	//	共有メモリ名は .tvtv のファイル名部分だけ (m2v と同じ規約)
 	char szName[MAX_PATH];
 	if (::WideCharToMultiByte(CP_ACP, 0, ::PathFindFileNameW(pszFile), -1,
 							  szName, MAX_PATH, nullptr, nullptr) <= 0)
-		return;
+		return false;
 
 	AribToAviUtl2Options opt;
 	opt.Preset = g_State.CaptionPreset;
@@ -118,7 +144,7 @@ void PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 						   L"TSMemory: 字幕を取り込めませんでした : %s",
 						   Source.GetLastError());
 		LogWarn(sz);
-		return;
+		return false;
 	}
 
 	//	外字のフォントを本体に登録する。
@@ -128,7 +154,6 @@ void PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 									   Source.GetFont().size());
 	}
 
-	const int Layer = g_State.CaptionLayer;
 	const double Rate = (edit->info != nullptr && edit->info->scale > 0)
 						? static_cast<double>(edit->info->rate) / edit->info->scale : 0.0;
 
@@ -205,6 +230,8 @@ void PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 						   Source.GetMissingGlyphCount());
 		LogWarn(sz);
 	}
+
+	return Placed > 0;
 }
 
 //	編集セクション内での実処理
@@ -308,7 +335,7 @@ void ProcEdit(void *param, EDIT_SECTION *edit)
 	}
 
 	//	字幕を置く。映像とは別のレイヤーに、時間に合わせて並べる
-	PlaceCaptions(edit, pszFile, lf);
+	const bool fCaptionPlaced = PlaceCaptions(edit, pszFile, lf);
 
 	//	プレビュー上での誤操作を防ぐ為に配置先レイヤーをロックする。
 	//
@@ -320,6 +347,13 @@ void ProcEdit(void *param, EDIT_SECTION *edit)
 		edit->set_layer_lock(g_State.Layer, true);
 		Log(L"TSMemory: 配置先レイヤーをロックしました "
 			L"(プレビュー上での誤操作を防ぎます)");
+
+		//	字幕のレイヤーも同じ扱いにする。次の取り込みでは
+		//	PlaceCaptions() が自分で外すので、掛けたままで構わない
+		if (fCaptionPlaced) {
+			edit->set_layer_lock(g_State.CaptionLayer, true);
+			Log(L"TSMemory: 字幕のレイヤーもロックしました");
+		}
 	}
 
 	//	ここまでの変更は TSMemory によるもの、と記録しておく

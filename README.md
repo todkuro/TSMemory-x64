@@ -22,6 +22,7 @@ AviUtl2 側
     TSMemory-TVTestSrc.aux2         汎用プラグイン (映像の読み込み・キャプチャ)
     TSMemory-TVTestSrc.ini          その設定
     English.TSMemory-TVTestSrc.aul2 英語表示用の言語ファイル
+    TSMemory字幕背景.anm2           字幕の背景を敷くスクリプト
 
 
 ## ビルド
@@ -104,6 +105,7 @@ bash tests/tools/fetch-ts-samples.sh
        %ProgramData%\aviutl2\Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.aux2
        %ProgramData%\aviutl2\Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.ini
        %ProgramData%\aviutl2\Language\English.TSMemory-TVTestSrc.aul2
+       %ProgramData%\aviutl2\Script\TSMemory字幕背景.anm2
 
 2. TVTest の Plugins フォルダに `TSMemory.tvtp` と `TSMemory.ini` を入れます。
 
@@ -167,7 +169,8 @@ AviUtl2 を、それぞれ再起動してください
 ### 2. 取り込む
 
 いつも通りキャプチャ実行キーを押します。映像が置かれた後、
-`[Caption] Layer` のレイヤーに字幕が 1 文ずつ並びます。
+`[Caption] Layer` のレイヤーに字幕が並びます。**放送は行ごとに位置を
+持っている**ので、1 行につき 1 つのテキストオブジェクトになります。
 
 うまくいくと AviUtl2 のログにこう出ます。
 

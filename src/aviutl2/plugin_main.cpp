@@ -23,6 +23,7 @@
 #include "capture.h"
 #include "exitguard.h"
 #include "drcs_font.h"
+#include "inifile.h"
 
 //	版は CHANGELOG.md が唯一の正で、tools/build.sh が
 //	build/generated/tsmemory_version.h を作って渡す。
@@ -214,9 +215,23 @@ EXTERN_C __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE *host)
 	//	  FontProbe=<フォントファイルのパス>
 	TSMemoryFontSetHost(host, g_pEdit);
 	{
+		//	UTF-8 (BOM 無し) の ini から日本語を含むパスを読む為、
+		//	生の GetPrivateProfileStringW ではなく専用の物を使う
+		//	(inifile.h の説明を参照)
 		WCHAR szFont[MAX_PATH] = {};
-		::GetPrivateProfileStringW(L"Caption", L"FontProbe", L"", szFont,
-								   ARRAYSIZE(szFont), g_szIniFileName);
+		TSMemoryGetIniString(g_szIniFileName, L"Caption", L"FontProbe", L"",
+							 szFont, ARRAYSIZE(szFont));
+
+		//	**設定が無い時も必ずログに出す。**
+		//	何も出ないと「設定を読めていない」のか「DLL が古い」のかが
+		//	切り分けられない
+		WCHAR szMessage[MAX_PATH + 96];
+		::StringCchPrintfW(szMessage, ARRAYSIZE(szMessage),
+						   L"TSMemory: [Caption] FontProbe = %s  (ini: %s)",
+						   szFont[0] != L'\0' ? szFont : L"(未設定)",
+						   g_szIniFileName);
+		TSMemoryLog(szMessage);
+
 		if (szFont[0] != L'\0')
 			TSMemoryFontProbe(szFont);
 	}

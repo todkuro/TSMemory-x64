@@ -116,26 +116,35 @@ bool TSMemoryRegisterFontCollection(const BYTE *pData, size_t Size)
 }
 
 
+//	登録したフォントが使えるかの確認。
+//
+//	**enum_font_name() は判定に使えない。**
+//	RegisterPlugin の中で呼ぶと、登録の前も後も 0 件を返す (実測)。
+//	それでも AviUtl2 のフォント一覧には出て、テキストオブジェクトの
+//	<@フォント名> でも描画される事を実機で確認済み。
+//	この API は別の時点でしか使えないと思われる為、判定には使わない。
 void TSMemoryVerifyFont(LPCWSTR pszFamily)
 {
-	WCHAR sz[192];
+	if (g_pEdit == nullptr || g_pEdit->enum_font_name == nullptr)
+		return;
 
-	//	1. フォント名の一覧に出てくるか
 	struct Ctx { LPCWSTR pszWant; bool fFound; int Count; } ctx = { pszFamily, false, 0 };
-	if (g_pEdit != nullptr && g_pEdit->enum_font_name != nullptr) {
-		g_pEdit->enum_font_name(&ctx, [](void *p, LPCWSTR name) {
-			Ctx *c = static_cast<Ctx *>(p);
-			c->Count++;
-			if (::lstrcmpiW(name, c->pszWant) == 0)
-				c->fFound = true;
-		});
-		::StringCchPrintfW(sz, ARRAYSIZE(sz),
-						   L"TSMemory: enum_font_name = %d 件 / \"%s\" は %s",
-						   ctx.Count, pszFamily, ctx.fFound ? L"あり" : L"なし");
-		TSMemoryLog(sz);
-	} else {
-		TSMemoryLogWarn(L"TSMemory: enum_font_name が使えません");
-	}
+	g_pEdit->enum_font_name(&ctx, [](void *p, LPCWSTR name) {
+		Ctx *c = static_cast<Ctx *>(p);
+		c->Count++;
+		if (::lstrcmpiW(name, c->pszWant) == 0)
+			c->fFound = true;
+	});
+
+	//	0 件なら「この時点では数えられない」だけなので黙っている
+	if (ctx.Count == 0)
+		return;
+
+	WCHAR sz[192];
+	::StringCchPrintfW(sz, ARRAYSIZE(sz),
+					   L"TSMemory: フォント一覧 %d 件 / \"%s\" は %s",
+					   ctx.Count, pszFamily, ctx.fFound ? L"あり" : L"なし");
+	TSMemoryLog(sz);
 }
 
 

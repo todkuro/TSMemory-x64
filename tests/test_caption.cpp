@@ -18,6 +18,7 @@
 
 #include "arib_text.h"
 #include "arib_to_aviutl2.h"
+#include "arib_gaiji.h"
 
 namespace {
 
@@ -304,6 +305,46 @@ void RunUnitTests()
 		check("ACPS gives the position in dots", X == 200 && Y == 449);
 		check("the line pitch comes from SSM and SVS", Pitch == 36 + 24);
 		check("text after ACPS is kept", AribItemsToPlainText(Items) == L"あ");
+	}
+
+	//	5c. **追加記号の対応表**。CP932 経由にすると別の文字になる。
+	//	   区 92 点 92 は CP932 だと「釗」になっていた (実測)
+	{
+		struct { int Ku, Ten; const wchar_t *Expect; } T[] = {
+			{  1, 33, L"〜" },		// 〜 (CP932 だと ～ になる)
+			{  5, 65, L"メ" },		// メ
+			{ 90, 53, nullptr },		// 🈐 (BMP 外。長さで見る)
+			{ 93, 90, L"♬" },		// ♬ (CP932 に無く、外字扱いだった)
+			{ 92, 92, nullptr },		// 未定義
+		};
+		bool fOk = true;
+		int Len = 0;
+		for (const auto &t : T) {
+			const WCHAR *p = TSMemoryAribKuTen(t.Ku, t.Ten, &Len);
+			if (t.Expect != nullptr)
+				fOk = fOk && p != nullptr && Len == 1 && p[0] == t.Expect[0];
+		}
+		check("the ARIB table gives the broadcast characters", fOk);
+
+		TSMemoryAribKuTen(92, 92, &Len);
+		check("an undefined ku/ten is reported as missing",
+			  TSMemoryAribKuTen(92, 92, &Len) == nullptr && Len == 0);
+
+		//	BMP の外にある記号はサロゲートペアの 2 個で返る
+		TSMemoryAribKuTen(90, 53, &Len);
+		check("a symbol outside the BMP comes back as a surrogate pair",
+			  TSMemoryAribKuTen(90, 53, &Len) != nullptr && Len == 2);
+	}
+
+	//	5d. 追加記号が外字ではなく本文として出る事。
+	//	   ESC 0x24 0x2A 0x3B で G2 に追加記号を割り当て、SS2 で 1 文字呼ぶ
+	{
+		//	区 93 点 90 = ♬。以前は CP932 に無く外字扱いになっていた
+		const BYTE d[] = { 0x1B, 0x24, 0x28, 0x3B, 0x7D, 0x7A };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("an additional symbol decodes into text, not a DRCS",
+			  AribItemsToPlainText(Items) == L"♬");
 	}
 
 	//	6. 外字 (DRCS)。ESC 0x24 0x28 0x20 0x41 で G0 を 2 バイト外字にする

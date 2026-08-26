@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "arib_text.h"
+#include "arib_gaiji.h"
 
 namespace {
 
@@ -54,44 +55,23 @@ CharSet FromFinal(BYTE F, bool fTwoByte)
 const int KU_HIRAGANA = 4;
 const int KU_KATAKANA = 5;
 
-//	JIS X 0208 の区点を Shift_JIS の 2 バイトに直す
-bool KuTenToSjis(int Ku, int Ten, BYTE *pOut)
-{
-	if (Ku < 1 || Ku > 94 || Ten < 1 || Ten > 94)
-		return false;
-
-	int s1, s2;
-	if (Ku <= 62)
-		s1 = (Ku + 257) / 2;
-	else
-		s1 = (Ku + 385) / 2;
-
-	if (Ku & 1) {
-		s2 = Ten + 63;
-		if (Ten >= 64)
-			s2 += 1;
-	} else {
-		s2 = Ten + 158;
-	}
-	pOut[0] = static_cast<BYTE>(s1);
-	pOut[1] = static_cast<BYTE>(s2);
-	return true;
-}
-
-//	区点から 1 文字を得る。**追加記号 (区 85-94) は Shift_JIS に無い**ので
-//	変換出来ず、空を返す (呼び出し側で外字と同じ扱いにする)
+//	区点から 1 文字を得る。無ければ空を返す
+//	(呼び出し側で外字と同じ扱いにする)。
+//
+//	**Shift_JIS (CP932) 経由にしてはいけない。**
+//	区 85-94 は ARIB の追加漢字・追加記号で、CP932 の同じ位置には
+//	別の文字が載っている。以前は CP932 に通していた為、
+//	例えば区 92 点 92 が「釗」になっていた。
+//	機械的に数えると、区点 8836 個のうち
+//	  214 個が違う文字になり、
+//	  1200 個は CP932 に無い為に出せていなかった (♬ 等)。
 std::wstring KuTenToText(int Ku, int Ten)
 {
-	BYTE Sjis[2];
-	if (!KuTenToSjis(Ku, Ten, Sjis))
+	int Length = 0;
+	const WCHAR *p = ::TSMemoryAribKuTen(Ku, Ten, &Length);
+	if (p == nullptr || Length <= 0)
 		return std::wstring();
-
-	WCHAR w[4] = {};
-	const int n = ::MultiByteToWideChar(932, MB_ERR_INVALID_CHARS,
-										reinterpret_cast<const char *>(Sjis), 2, w, 4);
-	if (n <= 0)
-		return std::wstring();
-	return std::wstring(w, n);
+	return std::wstring(p, Length);
 }
 
 //	JIS X 0201 の片仮名 (半角)
@@ -252,7 +232,7 @@ size_t PushColor(std::vector<AribItem> *pOut, const BYTE *pData, size_t Size,
 		if (i + 1 >= Size)
 			return Size;
 		if ((pData[i + 1] & 0xF0) == 0x40)
-			*pColorMap = pData[i + 1] & 0x0F;
+			*pColorMap = pData[i + 1] & 0x07;	// 色配列は 8 個 (3 ビット)
 		return i + 2;
 	}
 

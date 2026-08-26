@@ -31,6 +31,7 @@
 | TVTest (DBCTRADO) | `tools/setup-tvtest-src.sh` | `third_party/TVTest/` | 動作確認用の 64bit TVTest をビルドする時 |
 | TSMemory (dtvgit) | `tools/setup-tsmemory-src.sh` | `third_party/TSMemory/` | `src/m2v/` を pristine から作り直す時 (`tools/regen-m2v.sh`) |
 | TvtPlay (xtne6f) | `tools/setup-tvtplay-src.sh` | `third_party/TvtPlay/` | `test-live.sh` (TVTest 実走行) |
+| libaribcaption (xqq) | `tools/setup-libaribcaption-src.sh` | `third_party/libaribcaption/` | 字幕の追加記号表を作り直す時 (`tools/regen-gaiji.sh`) |
 | AviUtl ExEdit2 本体 | `tools/setup-aviutl2.sh` | `third_party/aviutl2/` | 実機での確認・`test-live.sh` |
 
 いずれも `bash tools/build.sh` と `bash tests/tools/test.sh` には不要。
@@ -50,7 +51,8 @@
   `setup-tvtest-src.sh` / `setup-tsmemory-src.sh` / `setup-tvtplay-src.sh` /
   `setup-aviutl2.sh`、
   ソースを再生成する `regen-m2v.sh` / `patch64.py` / `gen_simd_stub.sh` /
-  `to_utf8.py`、SDK を手動更新する `update-aviutl2-sdk.sh`。
+  `to_utf8.py` / `regen-gaiji.sh` / `gen_gaiji.py`、
+  SDK を手動更新する `update-aviutl2-sdk.sh`。
 - `tests/` … テストのソース (`test_*.cpp` 等)。**バージョン管理する**。
 - `tests/tools/` … テスト・デバッグ用のスクリプトとツール。
   **環境に依存しない物だけをバージョン管理する** (`.gitignore` で選別)。
@@ -91,6 +93,10 @@
   実際の放送 TS を持っている場合は同じ場所に足せば一緒に検査される。
 - `src/m2v/` への変更は `tools/patch64.py` に集約する。
   ソースを直接編集して済ませない (オリジナルから再生成できる状態を保つ)。
+- **生成したソースは commit する。**`src/m2v/` と
+  `src/aviutl2/caption/arib_gaiji.*` は生成物だが、クローン直後に
+  ビルドとテストが通る必要がある為に管理する。作り直す道具
+  (`regen-m2v.sh` / `regen-gaiji.sh`) は**ビルドから呼ばない**。
 
 ## 作業の進め方
 

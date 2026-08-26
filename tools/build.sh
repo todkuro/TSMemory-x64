@@ -197,7 +197,7 @@ echo "[4/4] packaging"
 
 PKG="$BUILD/package"
 rm -rf "$PKG"
-mkdir -p "$PKG/TVTest/Plugins" "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc" "$PKG/aviutl2/Language"
+mkdir -p "$PKG/TVTest/Plugins" "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc" \n	"$PKG/aviutl2/Language" "$PKG/aviutl2/Script"
 
 cp "$DIST/TSMemory.tvtp"          "$PKG/TVTest/Plugins/"
 cp "$ROOT/res/TSMemory.tvtp.ini"  "$PKG/TVTest/Plugins/TSMemory.ini"
@@ -205,6 +205,8 @@ cp "$ROOT/res/TSMemory.tvtp.ini"  "$PKG/TVTest/Plugins/TSMemory.ini"
 cp "$DIST/TSMemory-TVTestSrc.aux2"          "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc/"
 cp "$ROOT/res/TSMemory-TVTestSrc.aux2.ini"  "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc/TSMemory-TVTestSrc.ini"
 cp "$ROOT/res/English.TSMemory-TVTestSrc.aul2" "$PKG/aviutl2/Language/"
+#	字幕の背景を敷くスクリプト (src/aviutl2/caption/ から create_effect で貼る)
+cp "$ROOT/res/script/"*.anm2 "$PKG/aviutl2/Script/"
 cp "$ROOT/README.md"              "$PKG/"
 cp "$ROOT/CHANGELOG.md"           "$PKG/"
 # README から参照している調査メモ
@@ -229,10 +231,11 @@ fi
 # AviUtl2 のプレビュー画面に D&D でインストール出来るパッケージファイル
 AU2PKG="$BUILD/au2pkg"
 rm -rf "$AU2PKG"
-mkdir -p "$AU2PKG/Plugin/TSMemory-TVTestSrc" "$AU2PKG/Language"
+mkdir -p "$AU2PKG/Plugin/TSMemory-TVTestSrc" "$AU2PKG/Language" "$AU2PKG/Script"
 cp "$DIST/TSMemory-TVTestSrc.aux2"             "$AU2PKG/Plugin/TSMemory-TVTestSrc/"
 cp "$ROOT/res/TSMemory-TVTestSrc.aux2.ini"     "$AU2PKG/Plugin/TSMemory-TVTestSrc/TSMemory-TVTestSrc.ini"
 cp "$ROOT/res/English.TSMemory-TVTestSrc.aul2" "$AU2PKG/Language/"
+cp "$ROOT/res/script/"*.anm2                    "$AU2PKG/Script/"
 # au2pkg は Plugin\ Script\ Language\ 等の配下しかインストールされない為、
 # ライセンス表記はプラグイン本体と同じフォルダに入れる
 cp "$ROOT/sdk/aviutl2/license.txt" 	"$AU2PKG/Plugin/TSMemory-TVTestSrc/AviUtl2-Plugin-SDK-license.txt"

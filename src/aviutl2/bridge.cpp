@@ -53,6 +53,8 @@ struct BridgeState {
 	bool CaptionBackColor = true;         // 放送の背景色を影・縁色に流すか
 	bool CaptionBroadcastSize = false;    // 放送の文字の大きさに合わせるか
 	bool CaptionPosition = true;          // 放送の位置に合わせるか
+	int CaptionBackOpacity = 50;          // 背景の不透明度 (0 で背景なし)
+	std::wstring CaptionBackScript = L"TSMemory字幕背景";
 	int CaptionOffsetX = 0;               // 位置の微調整 (ピクセル)
 	int CaptionOffsetY = 0;
 	int ReadyDelay = 500;		// 初期化完了から待ち受け開始までの余裕 (ms)
@@ -201,6 +203,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 
 	int Placed = 0;
 	bool fPosOk = true;
+	bool fBackOk = true;
 	for (int i = 0; i < Source.GetCount(); i++) {
 		const TSMemoryCaption &c = Source.Get(i);
 		if (c.Text.empty())
@@ -262,6 +265,23 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 			if (Placed == 0)
 				fPosOk = VerifyItem(edit, o, L"X", X);
 		}
+		//	放送と同じ半透明の箱を敷く。
+		//
+		//	**図形オブジェクトではなくスクリプトにしている。**
+		//	図形だと寸法が作った時点で固定され、後からフォントや
+		//	文字サイズを変えると箱がずれる。スクリプトは描画後の
+		//	obj.w / obj.h を見るので付いて来る
+		if (g_State.CaptionBackOpacity > 0 && !g_State.CaptionBackScript.empty()) {
+			EFFECT_HANDLE e = edit->create_effect(o, g_State.CaptionBackScript.c_str());
+			if (e == nullptr) {
+				fBackOk = false;
+			} else {
+				char szv[16];
+				::wsprintfA(szv, "%d", g_State.CaptionBackOpacity);
+				edit->set_effect_item_value(e, L"不透明度", szv);
+			}
+		}
+
 		Placed++;
 	}
 
@@ -272,6 +292,16 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 					   Placed, Layer + 1,
 					   L" / 外字 ", Source.GetGlyphCount());
 	Log(sz);
+
+	if (!fBackOk) {
+		//	スクリプトが入っていないと create_effect() が nullptr を返す。
+		//	背景が無いだけで字幕自体は出るので、警告に留める
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 字幕の背景スクリプトが見つかりません "
+						   L"(%s.anm2 を Script フォルダに入れてください)",
+						   g_State.CaptionBackScript.c_str());
+		LogWarn(sz);
+	}
 
 	if (!fPosOk) {
 		//	効果名か項目名が違うと黙って位置が付かないだけになる
@@ -588,8 +618,14 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"OffsetX", 0, ini_file);
 		g_State.CaptionOffsetY =
 			::GetPrivateProfileIntW(L"Caption", L"OffsetY", 0, ini_file);
+		g_State.CaptionBackOpacity =
+			::GetPrivateProfileIntW(L"Caption", L"BackOpacity", 50, ini_file);
 
 		WCHAR sz[128];
+		TSMemoryGetIniString(ini_file, L"Caption", L"BackScript",
+							 L"TSMemory字幕背景", sz, ARRAYSIZE(sz));
+		g_State.CaptionBackScript = sz;
+
 		TSMemoryGetIniString(ini_file, L"Caption", L"Preset", L"", sz, ARRAYSIZE(sz));
 		g_State.CaptionPreset = sz;
 		TSMemoryGetIniString(ini_file, L"Caption", L"DrcsFont", L"TSMemory DRCS",

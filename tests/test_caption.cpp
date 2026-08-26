@@ -516,7 +516,8 @@ void RunConvertTests()
 		AribItemsToAviUtl2(Items, opt, &Drcs, &L);
 		check("the caption position is reported", L.IsValid());
 		check("the top is one line above the ACPS baseline",
-			  L.Left == 200 && L.Top == 509 + 1 - 60);
+			  L.Lines.size() == 1 && L.Lines[0].Left == 200
+			  && L.Lines[0].Top == 509 + 1 - 60);
 		check("the caption plane size comes from the geometry",
 			  L.PlaneWidth == 960 && L.PlaneHeight == 540);
 	}
@@ -537,7 +538,8 @@ void RunConvertTests()
 		AribCaptionLayout L;
 		AribItemsToAviUtl2(Items, opt, &Drcs, &L);
 		check("a ruby line does not move the caption position",
-			  L.Left == 80 && L.Top == 509 + 1 - 60);
+			  L.Lines.size() == 1 && L.Lines[0].Left == 80
+			  && L.Lines[0].Top == 509 + 1 - 60);
 	}
 
 	//	3d. **位置が 1 行下がったら改行**。放送は改行を送って来ない
@@ -552,8 +554,14 @@ void RunConvertTests()
 		AribToAviUtl2Options o2 = opt;
 		o2.UseBroadcastColor = false;
 		std::vector<int> Drcs;
-		check("a line below becomes a line break",
-			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>あ\nい");
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		//	**行ごとに別のオブジェクトになる。**放送は行ごとに座標を
+		//	持っているので、まとめると位置も背景の箱も合わなくなる
+		check("a line below becomes a separate line",
+			  L.Lines.size() == 2
+			  && L.Lines[0].Text == L"<$字幕>あ" && L.Lines[0].Top == 450
+			  && L.Lines[1].Text == L"<$字幕>い" && L.Lines[1].Top == 510);
 	}
 
 	//	3e. **ルビは行として数えない**。ルビは本文の 1 行上に先に書かれる
@@ -816,13 +824,14 @@ int main(int argc, char **argv)
 		const int n = ::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
 		std::vector<char> u8(n > 0 ? n : 1);
 		::WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, u8.data(), n, nullptr, nullptr);
-		if (k < Layouts.size() && Layouts[k].IsValid()) {
+		if (k < Layouts.size()) {
 			//	1920x1080 に置いた時の左上 (画面中央が原点)
-			const int X = Layouts[k].Left * 1920 / Layouts[k].PlaneWidth - 960;
-			const int Y = Layouts[k].Top * 1080 / Layouts[k].PlaneHeight - 540;
-			std::printf("  (%4d,%4d dots / %dx%d -> 1080p X=%d Y=%d)\n",
-						Layouts[k].Left, Layouts[k].Top,
-						Layouts[k].PlaneWidth, Layouts[k].PlaneHeight, X, Y);
+			for (const AribCaptionLine &Line : Layouts[k].Lines) {
+				const int X = Line.Left * 1920 / Layouts[k].PlaneWidth - 960;
+				const int Y = Line.Top * 1080 / Layouts[k].PlaneHeight - 540;
+				std::printf("  (%4d,%4d dots -> 1080p X=%d Y=%d)\n",
+							Line.Left, Line.Top, X, Y);
+			}
 		}
 		std::printf("  [%s]\n", u8.data());
 	}

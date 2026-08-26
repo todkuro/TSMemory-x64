@@ -28,11 +28,20 @@ struct TSMemoryCaption {
 	//	映像の先頭からの秒数。負なら不明
 	double Seconds = -1.0;
 
-	//	AviUtl2 のテキスト (制御文字を含む)
+	//	AviUtl2 のテキスト (制御文字を含む)。**1 行分**。
+	//	放送は行ごとに座標を持っているので、行ごとに 1 件にする
 	std::wstring Text;
 
-	//	字幕平面の中での位置
-	AribCaptionLayout Layout;
+	//	字幕平面の中での位置 (ドット)。負なら判らなかった
+	int Left = -1;
+	int Top = -1;
+	int PlaneWidth = 960;
+	int PlaneHeight = 540;
+
+	bool HasPosition() const
+	{
+		return Left >= 0 && Top >= 0 && PlaneWidth > 0 && PlaneHeight > 0;
+	}
 };
 
 class CTSCaptionSource

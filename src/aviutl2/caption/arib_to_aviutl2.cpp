@@ -69,22 +69,16 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 								std::vector<int> *pDrcsCodes,
 								AribCaptionLayout *pLayout)
 {
-	std::wstring Out;
-
 	//	**位置は「本文が実際に書かれた所」だけを見る。**
 	//	字幕平面の設定 (SDF/SDP) は本文の有無に関わらず送られて来るので、
 	//	そちらを見ると何も書いていない字幕まで位置を持ってしまう
-	int MinX = -1, MinTop = -1;
 	int PlaneW = 960, PlaneH = 540;
 
-	//	**書体を一括で変える為の指定。**
-	//	これを入れておくと、利用者は AviUtl2 側のテキストプリセットを
-	//	1 つ直すだけで全ての字幕の書体を変えられる
-	if (!Options.Preset.empty()) {
-		Out += L"<$";
-		Out += Options.Preset;
-		Out += L">";
-	}
+	//	**行ごとに 1 つのオブジェクトにする。**
+	//	放送は行ごとに座標を持っているので、まとめてしまうと
+	//	位置も背景の箱も放送と合わなくなる
+	std::vector<AribCaptionLine> Lines;
+	AribCaptionLine Cur;
 
 	//	**属性は「変わった時に、本文の直前で」出す。**
 	//	受け取った順にそのまま出すと、放送側が本文の無い所で何度も
@@ -123,15 +117,37 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		//	**ACPS が指しているのは行の下端。**1 行分引いて上端に直す
 		//	(実測: 行送り 60 で本文 y=509、その 1 行上のルビが y=449)
 		const int Top = PendingY + 1 - (PendingPitch > 0 ? PendingPitch : 60);
-		if (MinTop < 0 || Top < MinTop)
-			MinTop = Top;
-		if (MinX < 0 || PendingX < MinX)
-			MinX = PendingX;
 		const int Threshold = (PendingPitch > 0) ? PendingPitch * 3 / 4 : 1;
-		if (fAnyText && BaseY >= 0 && PendingY - BaseY >= Threshold)
-			Out += L"\n";
+		if (fAnyText && BaseY >= 0 && PendingY - BaseY >= Threshold) {
+			//	**行が変わった。**ここで区切って別のオブジェクトにする
+			if (!Cur.Text.empty())
+				Lines.push_back(Cur);
+			Cur = AribCaptionLine();
+			//	**行ごとに別のオブジェクトになるので、属性は出し直す。**
+			//	大きさだけは「既定」を覚えたままにする。-1 にすると
+			//	標準の行の先頭に無駄な <s> が付く
+			EmittedColor = -1;
+			EmittedBack = -1;
+			EmittedSize = 0;
+			fSizeEmitted = false;
+		}
+		if (Cur.Left < 0 || PendingX < Cur.Left)
+			Cur.Left = PendingX;
+		if (Cur.Top < 0 || Top < Cur.Top)
+			Cur.Top = Top;
 		BaseY = PendingY;
 		PendingY = -1;
+	};
+
+	//	本文を書き足す直前に、行の先頭ならプリセットを入れる
+	auto BeginLine = [&]() {
+		if (!Cur.Text.empty() || Options.Preset.empty())
+			return;
+		//	**書体を一括で変える為の指定。**利用者は AviUtl2 側の
+		//	テキストプリセットを 1 つ直すだけで全ての字幕の書体を変えられる
+		Cur.Text += L"<$";
+		Cur.Text += Options.Preset;
+		Cur.Text += L">";
 	};
 
 	auto Flush = [&]() {
@@ -140,14 +156,14 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		if ((fColor && Color != EmittedColor) || (fBack && Back != EmittedBack)) {
 			//	<#文字色,影縁色>。2 つ目は「背景の箱」ではなく影・縁色で、
 			//	テキストプリセット側で文字装飾を縁取りにして初めて見える
-			Out += L"<#";
+			Cur.Text += L"<#";
 			if (fColor)
-				AppendHex(&Out, AribColorToRgb(Color));
+				AppendHex(&Cur.Text, AribColorToRgb(Color));
 			if (fBack) {
-				Out += L",";
-				AppendHex(&Out, AribColorToRgb(Back));
+				Cur.Text += L",";
+				AppendHex(&Cur.Text, AribColorToRgb(Back));
 			}
-			Out += L">";
+			Cur.Text += L">";
 			EmittedColor = Color;
 			EmittedBack = Back;
 		}
@@ -161,22 +177,22 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 					n = (BaseSize + 1) / 2;
 				else if (Size == 3)
 					n = BaseSize * 2;
-				Out += L"<s";
-				Out += std::to_wstring(n);
-				Out += L">";
+				Cur.Text += L"<s";
+				Cur.Text += std::to_wstring(n);
+				Cur.Text += L">";
 				if (Size == 1)
-					Out += L"<tw50>";
+					Cur.Text += L"<tw50>";
 				else if (EmittedSize == 1)
-					Out += L"<tw>";
+					Cur.Text += L"<tw>";
 				fSizeEmitted = true;
 			} else {
 				switch (Size) {
-				case 1:  Out += L"<tw50>"; break;	// 横だけ縮める
-				case 2:  Out += L"<s*0.5>"; break;
-				case 3:  Out += L"<s*2>"; break;
+				case 1:  Cur.Text += L"<tw50>"; break;	// 横だけ縮める
+				case 2:  Cur.Text += L"<s*0.5>"; break;
+				case 3:  Cur.Text += L"<s*2>"; break;
 				default:
 					//	既定に戻す。横倍率も戻す
-					Out += (EmittedSize == 1) ? L"<tw>" : L"<s>";
+					Cur.Text += (EmittedSize == 1) ? L"<tw>" : L"<s>";
 					break;
 				}
 			}
@@ -188,13 +204,20 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		switch (it.Type) {
 		case AribItemType::Text:
 			NewLine();
+			BeginLine();
 			Flush();
-			Out += Escape(it.Text);
+			Cur.Text += Escape(it.Text);
 			fAnyText = true;
 			break;
 
 		case AribItemType::LineBreak:
-			Out += L"\n";
+			//	放送はまず送って来ないが、来たら行を切る
+			if (!Cur.Text.empty()) {
+				const int Left = Cur.Left;
+				Lines.push_back(Cur);
+				Cur = AribCaptionLine();
+				Cur.Left = Left;
+			}
 			break;
 
 		case AribItemType::Color:
@@ -228,9 +251,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		case AribItemType::Drcs: {
 			NewLine();
+			BeginLine();
 			Flush();
 			if (Options.DrcsFont.empty() || pDrcsCodes == nullptr) {
-				Out += Options.DrcsFallback;
+				Cur.Text += Options.DrcsFallback;
 				break;
 			}
 			//	同じ字形は同じ符号に割り当てる
@@ -248,11 +272,11 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 			//	外字の 1 文字だけフォントを切り替える。
 			//	本文の書体はプリセットのまま保たれる
-			Out += L"<@";
-			Out += Options.DrcsFont;
-			Out += L">";
-			Out += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
-			Out += L"<@>";			// 元の書体に戻す
+			Cur.Text += L"<@";
+			Cur.Text += Options.DrcsFont;
+			Cur.Text += L">";
+			Cur.Text += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
+			Cur.Text += L"<@>";			// 元の書体に戻す
 			fAnyText = true;
 			break;
 		}
@@ -271,11 +295,21 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		}
 	}
 
+	if (!Cur.Text.empty())
+		Lines.push_back(Cur);
+
 	if (pLayout != nullptr) {
-		pLayout->Left = MinX;
-		pLayout->Top = MinTop;
+		pLayout->Lines = Lines;
 		pLayout->PlaneWidth = PlaneW;
 		pLayout->PlaneHeight = PlaneH;
+	}
+
+	//	戻り値は全部を改行で繋いだ物。確認用と、行ごとに置けない時の保険
+	std::wstring Out;
+	for (size_t i = 0; i < Lines.size(); i++) {
+		if (i > 0)
+			Out += L"\n";
+		Out += Lines[i].Text;
 	}
 	return Out;
 }

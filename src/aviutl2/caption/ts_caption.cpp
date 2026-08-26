@@ -302,21 +302,21 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 				std::vector<AribItem> Items;
 				AribDecodeText(pUnit, Len, &Items);
 				AribCaptionLayout Layout;
-				const std::wstring Text =
-					AribItemsToAviUtl2(Items, Options, &DrcsCodes, &Layout);
+				AribItemsToAviUtl2(Items, Options, &DrcsCodes, &Layout);
 
-				//	本文の無い物 (画面消去だけ等) は置かない
-				bool fHasChar = false;
-				for (const AribItem &it : Items) {
-					if (it.Type == AribItemType::Text || it.Type == AribItemType::Drcs)
-						fHasChar = true;
-				}
-				if (fHasChar) {
+				//	**行ごとに 1 件にする。**放送は行ごとに座標を
+				//	持っているので、まとめると位置も背景も合わなくなる。
+				//	本文の無い物 (画面消去だけ等) は Lines が空になる
+				const double Seconds = (Pts >= 0 && VideoStart >= 0)
+									   ? PtsDiffSeconds(VideoStart, Pts) : -1.0;
+				for (const AribCaptionLine &Line : Layout.Lines) {
 					TSMemoryCaption c;
-					c.Text = Text;
-					c.Layout = Layout;
-					c.Seconds = (Pts >= 0 && VideoStart >= 0)
-								? PtsDiffSeconds(VideoStart, Pts) : -1.0;
+					c.Text = Line.Text;
+					c.Left = Line.Left;
+					c.Top = Line.Top;
+					c.PlaneWidth = Layout.PlaneWidth;
+					c.PlaneHeight = Layout.PlaneHeight;
+					c.Seconds = Seconds;
 					m_Captions.push_back(c);
 				}
 			} else if (Param == 0x30 || Param == 0x31) {	// 外字

@@ -250,12 +250,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	字幕平面 (960x540 等) の中の座標なので、出力の解像度へ
 		//	割り直してから、画面中央からのずれに直す
 		//	(AviUtl2 のオブジェクト座標は画面中央が原点)。
-		if (g_State.CaptionPosition && c.Layout.IsValid()
+		if (g_State.CaptionPosition && c.HasPosition()
 				&& edit->info != nullptr
 				&& edit->info->width > 0 && edit->info->height > 0) {
-			const int X = c.Layout.Left * edit->info->width / c.Layout.PlaneWidth
+			const int X = c.Left * edit->info->width / c.PlaneWidth
 						  - edit->info->width / 2 + g_State.CaptionOffsetX;
-			const int Y = c.Layout.Top * edit->info->height / c.Layout.PlaneHeight
+			const int Y = c.Top * edit->info->height / c.PlaneHeight
 						  - edit->info->height / 2 + g_State.CaptionOffsetY;
 			SetItemInt(edit, o, L"X", X);
 			SetItemInt(edit, o, L"Y", Y);

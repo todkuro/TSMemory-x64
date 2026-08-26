@@ -61,20 +61,30 @@ struct AribToAviUtl2Options {
 	wchar_t DrcsFirstCode = 0xE000;
 };
 
+//	字幕の 1 行。
+//
+//	**放送は行ごとに座標を持っている。**まとめて 1 つのオブジェクトに
+//	すると、行の長さが違っても背景が全体を囲む 1 つの箱になってしまう。
+//	行ごとに置けば位置も背景も放送どおりになる。
+struct AribCaptionLine {
+	std::wstring Text;		// AviUtl2 のテキスト (改行は含まない)
+	int Left = -1;			// 字幕平面の中での左上 (ドット)
+	int Top = -1;
+};
+
 //	字幕が画面のどこに出るか。
 //
 //	**字幕平面の中での位置**なので、出力の解像度に合わせて割り直す。
-//	Left/Top は字幕の左上 (ドット)。ACPS が指しているのは
-//	行の**下端**なので、1 行分の高さを引いて上端に直してある。
+//	ACPS が指しているのは行の**下端**なので、1 行分の高さを引いて
+//	上端に直してある。
 struct AribCaptionLayout {
-	int Left = -1;			// 負なら位置が判らなかった
-	int Top = -1;
+	std::vector<AribCaptionLine> Lines;
 	int PlaneWidth = 960;
 	int PlaneHeight = 540;
 
 	bool IsValid() const
 	{
-		return Left >= 0 && Top >= 0 && PlaneWidth > 0 && PlaneHeight > 0;
+		return !Lines.empty() && PlaneWidth > 0 && PlaneHeight > 0;
 	}
 };
 

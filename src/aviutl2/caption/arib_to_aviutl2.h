@@ -46,6 +46,17 @@ struct AribToAviUtl2Options {
 	//	Preset のテキストプリセット側で文字装飾を縁取りにする必要がある。
 	bool UseBroadcastBackColor = true;
 
+	//	放送の文字の大きさに合わせるか。
+	//
+	//	字幕は「字幕平面の中で何ドット角か」で指定されて来る
+	//	(例: 960x540 の平面で 36 ドット角)。ScreenHeight と合わせて
+	//	AviUtl2 のサイズに直す。1080p なら 36 * 1080 / 540 = 72。
+	//	0 にするとテキストプリセット側のサイズのままになる。
+	bool UseBroadcastSize = false;
+
+	//	出力の高さ (ピクセル)。UseBroadcastSize の時に要る
+	int ScreenHeight = 0;
+
 	//	外字に割り当てる私用領域の先頭
 	wchar_t DrcsFirstCode = 0xE000;
 };

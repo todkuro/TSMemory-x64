@@ -29,6 +29,7 @@ enum class AribItemType {
 	Position,		// A = X, B = Y (字幕平面のドット。APS も ACPS もここに来る)
 	ClearScreen,	// 画面消去 (CS)
 	LineBreak,		// 改行 (APD / APR)
+	Geometry,		// A = 文字の高さ, B = 字幕平面の高さ (どちらもドット)
 };
 
 struct AribItem {

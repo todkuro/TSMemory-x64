@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <string>
+#include <cwchar>
 #include <vector>
 
 #include "arib_to_aviutl2.h"
@@ -101,6 +102,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	int Back = -1, EmittedBack = -1;
 	int Size = 0, EmittedSize = 0;
 
+	//	放送の文字の大きさ (AviUtl2 のサイズに直した値)。0 ならプリセット任せ
+	int BaseSize = 0;
+	bool fSizeEmitted = false;
+
 	//	本文を出す直前に呼ぶ。行が変わっていたら改行を入れる
 	auto NewLine = [&]() {
 		if (PendingY < 0)
@@ -133,16 +138,34 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			EmittedColor = Color;
 			EmittedBack = Back;
 		}
-		if (Size != EmittedSize) {
+		if (Size != EmittedSize || (BaseSize > 0 && !fSizeEmitted)) {
 			//	0 標準 / 1 中型 (横半分) / 2 小型 (縦横半分) / 3 倍角
-			switch (Size) {
-			case 1:  Out += L"<tw50>"; break;	// 横だけ縮める
-			case 2:  Out += L"<s*0.5>"; break;
-			case 3:  Out += L"<s*2>"; break;
-			default:
-				//	既定に戻す。横倍率も戻す
-				Out += (EmittedSize == 1) ? L"<tw>" : L"<s>";
-				break;
+			if (BaseSize > 0) {
+				//	**放送の大きさに合わせる。**相対指定ではなく
+				//	絶対値で出すので、プリセットのサイズは効かなくなる
+				int n = BaseSize;
+				if (Size == 2)
+					n = (BaseSize + 1) / 2;
+				else if (Size == 3)
+					n = BaseSize * 2;
+				Out += L"<s";
+				Out += std::to_wstring(n);
+				Out += L">";
+				if (Size == 1)
+					Out += L"<tw50>";
+				else if (EmittedSize == 1)
+					Out += L"<tw>";
+				fSizeEmitted = true;
+			} else {
+				switch (Size) {
+				case 1:  Out += L"<tw50>"; break;	// 横だけ縮める
+				case 2:  Out += L"<s*0.5>"; break;
+				case 3:  Out += L"<s*2>"; break;
+				default:
+					//	既定に戻す。横倍率も戻す
+					Out += (EmittedSize == 1) ? L"<tw>" : L"<s>";
+					break;
+				}
 			}
 			EmittedSize = Size;
 		}
@@ -171,6 +194,18 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		case AribItemType::Size:
 			Size = it.A;
+			break;
+
+		case AribItemType::Geometry:
+			//	字幕平面の何ドット角か、を出力の大きさに直す
+			if (Options.UseBroadcastSize && Options.ScreenHeight > 0
+					&& it.A > 0 && it.B > 0) {
+				const int n = it.A * Options.ScreenHeight / it.B;
+				if (n != BaseSize) {
+					BaseSize = n;
+					fSizeEmitted = false;
+				}
+			}
 			break;
 
 		case AribItemType::Drcs: {

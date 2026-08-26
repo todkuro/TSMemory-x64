@@ -123,6 +123,7 @@ struct State {
 	int OrigX = 0, OrigY = 0;		// SDP : 表示領域の左上
 	int CharW = 36, CharH = 36;		// SSM : 文字の大きさ
 	int SpaceH = 4, SpaceV = 24;	// SHS / SVS : 字間・行間
+	int PlaneW = 960, PlaneH = 540;	// SWF : 字幕平面そのものの大きさ
 
 	//	1 文字分の送り幅・送り高さ
 	int PitchX() const { return CharW + SpaceH; }
@@ -170,8 +171,26 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	case 0x5F:		// SDP : 表示領域の左上
 		if (Count >= 2) { pSt->OrigX = Param[0]; pSt->OrigY = Param[1]; }
 		break;
+	case 0x53:		// SWF : 表示書式 (字幕平面の大きさ)
+		if (Count >= 1) {
+			switch (Param[0]) {
+			case 5:  pSt->PlaneW = 1920; pSt->PlaneH = 1080; break;
+			case 7:  pSt->PlaneW = 960;  pSt->PlaneH = 540;  break;
+			case 9:  pSt->PlaneW = 720;  pSt->PlaneH = 480;  break;
+			case 11: pSt->PlaneW = 1280; pSt->PlaneH = 720;  break;
+			default: break;
+			}
+			PushSimple(pOut, AribItemType::Geometry, pSt->CharH, pSt->PlaneH);
+		}
+		break;
 	case 0x57:		// SSM : 文字の大きさ
-		if (Count >= 2) { pSt->CharW = Param[0]; pSt->CharH = Param[1]; }
+		if (Count >= 2) {
+			pSt->CharW = Param[0];
+			pSt->CharH = Param[1];
+			//	**文字の大きさは字幕平面の大きさと組でないと意味が無い。**
+			//	36 ドットが 960x540 なら 1080p では 72 相当になる
+			PushSimple(pOut, AribItemType::Geometry, pSt->CharH, pSt->PlaneH);
+		}
 		break;
 	case 0x58:		// SHS : 字間
 		if (Count >= 1) pSt->SpaceH = Param[0];
@@ -350,29 +369,33 @@ void AribDecodeText(const BYTE *pData, size_t Size, std::vector<AribItem> *pOut)
 					PushSimple(pOut, AribItemType::Size, pData[i] == 0x41 ? 3 : 0);
 				i++;
 				break;
-			case 0x8C:	// COL
-				i = PushColor(pOut, pData, Size, i, &st.ColorMap);
-				break;
-			case 0x90:
-				//	**実データに合わせている。**
-				//	`90 20 44` と `90 51` の両方が現れ、COL (0x8C) と同じ
-				//	「0x20 が続けば 2 バイト、そうでなければ 1 バイト」の形。
-				//	1 バイト固定で読むと次の文字とずれ、以降が全て化ける。
-				//	続く値も 0x40+n / 0x50+n と色指定の並びになっている
+			//	**引数の数を 1 つでも間違えると、以降が全て化ける。**
+			//	`0x8C..0x8F` は 8 単位符号では未割り当てで、COL は 0x90。
+			//	実データの `90 20 44` / `90 51` もこの割り当てと合う
+			case 0x90:	// COL (1、0x20 が続けば 2)
 				i = PushColor(pOut, pData, Size, i, &st.ColorMap);
 				break;
 
-			case 0x8D: case 0x8E: case 0x8F:	// FLC / CDC / POL
-			case 0x91: case 0x93:				// MACRO / HLC
-			case 0x94:							// RPC
+			case 0x92:	// CDC (1、0x20 が続けば 2)
+				if (i < Size && pData[i] == 0x20)
+					i += 2;
+				else
+					i++;
+				break;
+
+			case 0x91:	// FLC (1)
+			case 0x93:	// POL (1)
+			case 0x94:	// WMM (1)
+			case 0x95:	// MACRO (1)
+			case 0x97:	// HLC (1)。**囲み。消費しないと引数が本文に混ざる**
+			case 0x98:	// RPC (1)
 				i++;
 				break;
 
-			case 0x95: case 0x96:				// SPL / STL (引数なし)
+			case 0x99: case 0x9A:				// SPL / STL (引数なし)
 				break;
-			case 0x98:	i += 2; break;			// TIME
 			case 0x9B:	i = ParseCsi(pData, Size, i, &st, pOut); break;	// CSI
-			case 0x9D:	i += 2; break;			// TIME (別符号位置)
+			case 0x9D:	i += 2; break;			// TIME (2)
 			default:
 				break;
 			}

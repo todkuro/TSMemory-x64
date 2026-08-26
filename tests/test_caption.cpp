@@ -592,6 +592,25 @@ int main(int argc, char **argv)
 	}
 	std::printf("data units : 本文 %d / DRCS %d (合計 %zu)\n\n", Body, Drcs, Units.size());
 
+	//	**本文が無い時こそ生バイトが要る。**復号に失敗しているのか
+	//	本当に画面消去だけなのかは、これを見ないと切り分けられない
+	if (fDump) {
+		std::printf("--- データユニットの生バイト (先頭 6 件) ---\n");
+		int n = 0;
+		for (const CaptionUnit &u : Units) {
+			//	画面消去だけの 1 バイトの物は見ても仕方がない
+			if (u.Body.size() <= 4 && Units.size() > 6)
+				continue;
+			if (++n > 6)
+				break;
+			std::printf("  [param %02X / %zu bytes]", u.Parameter, u.Body.size());
+			for (size_t i = 0; i < u.Body.size() && i < 160; i++)
+				std::printf(" %02X", u.Body[i]);
+			std::printf("\n");
+		}
+		std::printf("\n");
+	}
+
 	//	字幕 PID はあるが本文が無い切り出し (画面消去だけ等) も検査対象外
 	if (Body == 0) {
 		std::printf("no caption text data unit in this range - skipped\n");
@@ -668,20 +687,6 @@ int main(int argc, char **argv)
 		std::printf("  [%s]\n", u8.data());
 	}
 
-	if (fDump) {
-		std::printf("\n--- 本文の生バイト (先頭 6 件) ---\n");
-		int n = 0;
-		for (const CaptionUnit &u : Units) {
-			if (u.Parameter != 0x20 || u.Body.size() < 8)
-				continue;
-			if (++n > 2)
-				break;
-			std::printf("  [%zu bytes]", u.Body.size());
-			for (size_t i = 0; i < u.Body.size() && i < 120; i++)
-				std::printf(" %02X", u.Body[i]);
-			std::printf("\n");
-		}
-	}
 	std::printf("\n%s (%d failure%s)\n", g_failures == 0 ? "PASS" : "FAIL",
 				g_failures, g_failures == 1 ? "" : "s");
 	return g_failures == 0 ? 0 : 1;

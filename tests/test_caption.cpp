@@ -504,6 +504,24 @@ void RunConvertTests()
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><#ffffff>あ");
 	}
 
+	//	3l. **中型 (MSZ) は <tw0.5>。**<tw> は百分率ではなく倍率で、
+	//	   <tw50> と書くと 50 倍に引き伸ばされ、文字が横一線に潰れて
+	//	   画面を横切る (実測で発生)
+	{
+		std::vector<AribItem> Items;
+		AribItem m; m.Type = AribItemType::Size; m.A = 1;	// 中型
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		AribItem n; n.Type = AribItemType::Size; n.A = 0;	// 標準に戻す
+		AribItem t2; t2.Type = AribItemType::Text; t2.Text = L"い";
+		Items.push_back(m); Items.push_back(t);
+		Items.push_back(n); Items.push_back(t2);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("the middle size is a scale, not a percentage",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><tw0.5>あ<tw>い");
+	}
+
 	//	3f. **位置**。ACPS は行の下端を指すので 1 行分引いて上端にする
 	{
 		std::vector<AribItem> Items;

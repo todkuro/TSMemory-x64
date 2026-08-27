@@ -194,13 +194,17 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 				Cur.Text += std::to_wstring(n);
 				Cur.Text += L">";
 				if (Size == 1)
-					Cur.Text += L"<tw50>";
+					Cur.Text += L"<tw0.5>";
 				else if (EmittedSize == 1)
 					Cur.Text += L"<tw>";
 				fSizeEmitted = true;
 			} else {
 				switch (Size) {
-				case 1:  Cur.Text += L"<tw50>"; break;	// 横だけ縮める
+				//	**<tw> は百分率ではなく倍率。**
+				//	aviutl2.txt の例が <tw0.8> になっている。
+				//	<tw50> と書くと 50 倍に引き伸ばされ、文字が
+				//	横一線に潰れて画面を横切る (実機で発生)
+				case 1:  Cur.Text += L"<tw0.5>"; break;	// 横だけ縮める
 				case 2:  Cur.Text += L"<s*0.5>"; break;
 				case 3:  Cur.Text += L"<s*2>"; break;
 				default:

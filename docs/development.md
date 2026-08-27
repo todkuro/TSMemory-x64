@@ -2723,16 +2723,18 @@ TVTest 側で `CTsSelector` に落とされると後段では取り返せない�
 
     TSMemory.ini (TVTest 側)      TSMemory-TVTestSrc.ini (AviUtl2 側)
     [Settings]                    [Caption]
-    Subtitle=1                    Enable=1
+    Subtitle=1  (既定)            Enable=1
+
+**TVTest 側だけ既定を 1 にしている。**理由は下記。
 
 `GetTargetStreams()` に `CTsSelector::STREAM_SUBTITLE` (stream_type 0x06)
 を足している。`tests/test_selector.cpp` で「頼めば通る/頼まなければ落ちる」
 の両方を確認している。
 
-#### `Subtitle=1` のまま `Enable=0` にする形の費用
+#### なぜ TVTest 側だけ既定を 1 にしたか
 
 「普段は字幕が要らないが、欲しくなった時に TVTest を再起動したくない」
-という使い方の実費を測った。
+という使い方の実費を測り、**十分に安いので既定にした**。
 
 **AviUtl2 側の処理は増えない。**`PlaceCaptions()` は先頭で
 `if (!g_State.CaptionEnable) return false;` しており、
@@ -2756,7 +2758,8 @@ anime_puniru.ts             映像 97.70% / 音声 2.28% / 字幕 0.02%
 `CTSMemory::Initialize()` でしか読まないので変更に TVTest の再起動が
 要り、`[Caption] Enable` は `TSMemoryBridgeStart()` なので AviUtl2 の
 再起動で済む。**視聴中・録画中に落としたくないのは TVTest の方**なので、
-TVTest 側は通しておいて AviUtl2 側で切る形が扱いやすい。
+TVTest 側は通しておいて AviUtl2 側で切る形にした。
+字幕を 1 バイトも通したくない場合は `Subtitle=0` で従来通りになる。
 
 ### 残っている作業
 
@@ -2785,10 +2788,10 @@ TVTest 側は通しておいて AviUtl2 側で切る形が扱いやすい。
   `src/aviutl2/audio/` に別途用意し、AAC の復号は Windows 標準の
   Media Foundation に任せています。
   片方だけ有効にした場合の挙動は「片方だけ設定した場合」を参照。
-- **字幕は既定で無効です。** 有効にするには**両方**の設定が要ります
-  (`TSMemory.ini` の `[Settings] Subtitle=1` と
-  `TSMemory-TVTestSrc.ini` の `[Caption] Enable=1`)。詳細は上の
-  「字幕対応」。絶対位置指定と文字スーパーは未対応です。
+- **字幕は既定で無効です。** 有効にするには**両方**の設定が要りますが、
+  TVTest 側 (`TSMemory.ini` の `[Settings] Subtitle`) は**既定で 1**
+  なので、普通は `TSMemory-TVTestSrc.ini` の `[Caption] Enable=1` だけで
+  済みます。詳細は上の「字幕対応」。絶対位置指定と文字スーパーは未対応です。
 - スクランブルされたパケットは捨てられます。TVTest 側で解除された状態で
   受け取る必要があります。
 - **遡れる長さは `MemorySize` (既定 10MB) が上限です。**

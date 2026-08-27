@@ -339,7 +339,14 @@ bool CTSMemory::Initialize()
 	//	音声も溜め込むか。既定は映像のみ (従来どおり)。
 	//	AviUtl2 側の [M2V] audio と揃えて使う。
 	m_fAudio = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Audio"), 0, m_szIniFileName) != 0;
-	m_fSubtitle = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Subtitle"), 0, m_szIniFileName) != 0;
+	//	字幕も溜め込むか。**既定は 1 (通す)。**
+	//	AviUtl2 側の [Caption] Enable が 0 なので、このままでは
+	//	字幕は置かれない。通しておくのは、欲しくなった時に
+	//	**AviUtl2 の再起動だけで切り替えられる**ようにする為
+	//	(この値は Initialize() でしか読まないので、0 にしていると
+	//	 変更に TVTest の再起動が要る)。
+	//	リングバッファを食う量は取り込む分の 0.01〜0.02% (実測)。
+	m_fSubtitle = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Subtitle"), 1, m_szIniFileName) != 0;
 
 	m_SnapshotCount = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("SnapshotCount"),
 											 DEFAULT_SNAPSHOT_COUNT, m_szIniFileName);

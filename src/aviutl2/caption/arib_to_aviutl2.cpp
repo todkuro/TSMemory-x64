@@ -377,6 +377,13 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			PendingPitchX = it.D;
 			break;
 
+		case AribItemType::Ornament:
+			//	縁取り。**AviUtl2 側では文字装飾がプリセットの持ち物**で、
+			//	制御文字からは切り替えられない。<#文字色,影縁色> の
+			//	2 つ目に流す事はできるが、プリセットの文字装飾を
+			//	縁取りにしていないと見えない。今は使っていない
+			break;
+
 		case AribItemType::ClearScreen:
 			//	画面消去は字幕の区切りとして呼び出し側が使う
 			break;

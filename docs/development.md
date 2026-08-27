@@ -2313,6 +2313,56 @@ Record_20260827-140438.ts         1  ->  0
 `<tw>` が消えた。半角形の無い字 (漢字・ひらがな等) に中型が来た場合の
 `<tw0.5>` は残してある。
 
+#### 縁取り (ORN) は放送にも乗っているが、既定の縁は TVCaptionMod2 の物
+
+TVCaptionMod2 の字幕には文字に黒い縁が付く。**両方が混ざっている。**
+
+ARIB STD-B24 には文字外縁 (ORN) の指定がある。
+`CSI P1 ; P2 SP 0x63` で、P1 = 0 なし / 1 縁取り、
+**P2 = 色配列 * 100 + 色番号** (CLUT の索引は 色配列 * 16 + 色番号)。
+
+実測 (`build/ts-examples/` の字幕を持つ 8 本):
+
+```
+Record_20260827-110354.ts   4 件 / 色 0 (黒)     … 8 ユニット中
+Record_20260827-140438.ts   8 件 / 色 0 (黒)     … 16 ユニット中
+残り 6 本                   0 件
+```
+
+生バイトは `9B 31 3B 30 30 30 30 20 63` = `CSI "1;0000" SP 'c'`。
+CLUT の 0 番は `(0,0,0,255)` = 不透明の黒。
+**番組によって送る局と送らない局がある**が、送る局は毎ユニット送る。
+
+一方 TVCaptionMod2 の縁は、既定で**全ての字幕に付く**。
+`src/TVCaption2.cpp`:
+
+```cpp
+m_strokeWidth    = GetBufferedProfileInt(buf, TEXT("StrokeWidth"), -2);
+m_ornStrokeWidth = GetBufferedProfileInt(buf, TEXT("OrnStrokeWidth"), 4);
+...
+int strokeWidth = m_strokeWidth;
+if (style.bORN == 1) {
+    // 縁取り指定。着色対応は省略
+    strokeWidth = max(m_ornStrokeWidth, 0) * (strokeWidth < 0 ? -1 : 1);
+}
+```
+
+- `StrokeWidth` の既定が **-2** (負 = 文字の高さに対する相対) なので、
+  ORN の有無に関わらず縁が付く
+- ORN が来た時だけ太さを `OrnStrokeWidth` (既定 4) に替える
+- **色は見ていない** (コメントの通り)。`CPseudoOSD` は文字の
+  アルファを `DilateAlpha()` で膨らませて背景色で塗る作りなので、
+  縁の色は常に「背景の色」になる
+
+つまり**画面に見えている縁の大半は TVCaptionMod2 が付けた物**で、
+放送の指定は太さを変えているだけ。
+
+こちらでは ORN を `AribItemType::Ornament` として取り出す所までを
+実装し、出力には使っていない。**AviUtl2 では文字装飾がプリセットの
+持ち物**で、制御文字からは切り替えられない。`<#文字色,影縁色>` の
+2 つ目に流す事はできるが、プリセットの文字装飾を縁取りにして
+いないと見えない。
+
 #### 改行は座標から起こす
 
 **放送の字幕は改行を送って来ない。** 1 行ごとに ACPS

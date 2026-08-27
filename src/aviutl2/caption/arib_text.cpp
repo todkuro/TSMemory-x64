@@ -188,6 +188,21 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	case 0x59:		// SVS : 行間
 		if (Count >= 1) pSt->SpaceV = Param[0];
 		break;
+	case 0x63:		// ORN : 文字外縁 (縁取り)
+		//	P1 = 0 なし / 1 縁取り。
+		//	**縁の色は 1 つの数に詰められている。**
+		//	P2 = 色配列 * 100 + 色番号 で、CLUT の索引は
+		//	色配列 * 16 + 色番号。100 で割った所を取り違えると
+		//	関係の無い色になる
+		if (Count >= 1 && Param[0] == 0) {
+			PushSimple(pOut, AribItemType::Ornament, 0);
+		} else if (Count >= 2 && Param[0] == 1) {
+			const int Map = Param[1] / 100;
+			const int Num = Param[1] % 100;
+			if (Map < 8 && Num < 16)
+				PushSimple(pOut, AribItemType::Ornament, 1, Map * 16 + Num);
+		}
+		break;
 	case 0x61:		// ACPS : 表示位置 (ドット)
 		if (Count >= 2) {
 			pSt->PenX = Param[0];

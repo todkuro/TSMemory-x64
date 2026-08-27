@@ -31,6 +31,10 @@ enum class AribItemType {
 	//	  SSZ 小型 = 5,5 / MSZ 中型 = 5,10 / NSZ 標準 = 10,10
 	//	  SZX 0x41 = 10,20 (縦だけ) / 0x44 = 20,10 (横だけ) / 0x45 = 20,20
 	Size,
+	//	ORN (文字外縁 / 縁取り)。A = 0 なし / 1 縁取り、B = 縁の色 (0-127)。
+	//	**放送が実際に送って来る。**TVCaptionMod2 は縁の太さだけを
+	//	これで切り替えており、色は見ていない (「着色対応は省略」)
+	Ornament,
 	Position,		// A = X, B = Y (字幕平面のドット。APS も ACPS もここに来る)
 	ClearScreen,	// 画面消去 (CS)
 	LineBreak,		// 改行 (APD / APR)

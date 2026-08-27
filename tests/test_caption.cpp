@@ -316,6 +316,44 @@ void RunUnitTests()
 		check("text after ACPS is kept", AribItemsToPlainText(Items) == L"あ");
 	}
 
+	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
+	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
+	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、
+	//	   CLUT の索引は 色配列 * 16 + 色番号。100 で割る所を取り違えると
+	//	   関係の無い色になる
+	{
+		//	CSI "1;0000" SP 'c' … 縁取りあり、色配列 0 の 0 番 (黒)
+		const BYTE d[] = {
+			0x9B, 0x31, 0x3B, 0x30, 0x30, 0x30, 0x30, 0x20, 0x63,
+			0x24, 0x22,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Orn = -1, Color = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Ornament) { Orn = it.A; Color = it.B; }
+		}
+		check("ORN reports the outline and its colour", Orn == 1 && Color == 0);
+		check("CLUT 0 is opaque black",
+			  TSMemoryAribClut(0).R == 0 && TSMemoryAribClut(0).A == 255);
+		check("text after ORN is kept", AribItemsToPlainText(Items) == L"あ");
+	}
+
+	//	5d. 色配列を伴う ORN。CSI "1;0305" SP 'c' = 色配列 3 の 5 番
+	{
+		const BYTE d[] = {
+			0x9B, 0x31, 0x3B, 0x30, 0x33, 0x30, 0x35, 0x20, 0x63,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Color = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Ornament) Color = it.B;
+		}
+		check("the ORN colour is colour-map * 16 + number",
+			  Color == 3 * 16 + 5);
+	}
+
 	//	5e. **APS の行送りは文字サイズで変わる**。
 	//	   小型 (SSZ) の行に標準の送りを使うと画面の外を指す
 	//	   (実測: 区切りの行が y=990 になり 540 の字幕平面をはみ出した)
@@ -960,6 +998,12 @@ int main(int argc, char **argv)
 
 	//	--- 復号 -------------------------------------------------------------
 	int Decoded = 0, WithText = 0, DrcsRefs = 0, Positions = 0, Colors = 0;
+	//	**縁取り (ORN) は放送が送って来るのか。**
+	//	TVCaptionMod2 は既定 (StrokeWidth=-2) で全ての字幕に縁を付け、
+	//	ORN が来た時だけ太さを OrnStrokeWidth に替えている。
+	//	どちらが効いているのかを実測で切り分ける為に数える
+	int Ornaments = 0;
+	std::map<int, int> OrnColors;
 	//	**同じ高さで横に離れた位置に書き直した回数。**
 	//	複数の話者を同時に別の場所へ出す字幕で起こる。
 	//	行の区切りを Y だけで見ていると 1 行に繋がってしまう
@@ -982,6 +1026,10 @@ int main(int argc, char **argv)
 		for (const AribItem &it : Items) {
 			if (it.Type == AribItemType::Drcs) DrcsRefs++;
 			if (it.Type == AribItemType::Color) Colors++;
+			if (it.Type == AribItemType::Ornament && it.A == 1) {
+				Ornaments++;
+				OrnColors[it.B]++;
+			}
 			if (it.Type == AribItemType::Text || it.Type == AribItemType::Drcs) {
 				if (it.C > 0)
 					Pen = it.C;
@@ -1036,8 +1084,12 @@ int main(int argc, char **argv)
 	std::printf("  制御 : 位置 %d / 色 %d / 外字 %d"
 				" / 同じ高さで横に飛んだ %d\n",
 				Positions, Colors, DrcsRefs, SideBySide);
-	std::printf("  行 : 合計 %d / うち同じ高さで割れた %d\n\n",
+	std::printf("  行 : 合計 %d / うち同じ高さで割れた %d\n",
 				TotalLines, SplitSameRow);
+	std::printf("  縁取り (ORN) : %d 件", Ornaments);
+	for (const auto &e : OrnColors)
+		std::printf(" / 色 %d が %d 件", e.first, e.second);
+	std::printf("\n\n");
 
 	//	本文はあるが画面消去だけ、という区間もある (短い切り出しで起こる)
 	if (WithText == 0) {

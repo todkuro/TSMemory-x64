@@ -58,6 +58,7 @@ struct BridgeState {
 	int CaptionBackPaddingY = 4;
 	bool CaptionBackDebug = false;        // スクリプト側の切り分け出力
 	bool CaptionAlignTop = false;         // 縦の基準が中央だった場合の補正
+	bool CaptionAlignLeft = true;         // 横の基準が中央だった場合の補正
 	int CaptionLayersUsed = 1;            // 字幕が使ったレイヤーの本数
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
 	bool CaptionDebug = false;            // 1 件目のオブジェクトの中身をログに出す
@@ -419,7 +420,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				edit->set_effect_item_value(e, L"デバッグ表示",
 										   g_State.CaptionBackDebug ? "1" : "0");
 				edit->set_effect_item_value(e, L"左端で合わせる",
-										   g_State.CaptionPosition ? "1" : "0");
+										   (g_State.CaptionPosition
+											&& g_State.CaptionAlignLeft) ? "1" : "0");
 				edit->set_effect_item_value(e, L"上端で合わせる",
 										   g_State.CaptionAlignTop ? "1" : "0");
 			}
@@ -787,6 +789,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackDebug", 0, ini_file) != 0;
 		g_State.CaptionAlignTop =
 			::GetPrivateProfileIntW(L"Caption", L"AlignTop", 0, ini_file) != 0;
+		g_State.CaptionAlignLeft =
+			::GetPrivateProfileIntW(L"Caption", L"AlignLeft", 1, ini_file) != 0;
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"BackScript",

@@ -296,7 +296,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		if (g_State.CaptionPosition && c.HasPosition()
 				&& edit->info != nullptr
 				&& edit->info->width > 0 && edit->info->height > 0) {
-			const int X = c.Left * edit->info->width / c.PlaneWidth
+			//	**X はテキストの「中央」。**実測 (X=-620 / サイズ 72 /
+			//	10 文字) で、左端ではなく中央が指定した座標に来た。
+			//	「左寄せ[上]」は縦だけ上端基準で、横は中央基準
+			const int X = c.CenterX * edit->info->width / c.PlaneWidth
 						  - edit->info->width / 2 + g_State.CaptionOffsetX;
 			const int Y = c.Top * edit->info->height / c.PlaneHeight
 						  - edit->info->height / 2 + g_State.CaptionOffsetY;
@@ -309,10 +312,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				//	字幕平面の座標と、実際に設定した値の両方を残す
 				WCHAR szp[192];
 				::StringCchPrintfW(szp, ARRAYSIZE(szp),
-								   L"TSMemory: 1 件目の位置 : 字幕平面 (%d,%d) "
-								   L"/ %dx%d -> X=%d Y=%d",
-								   c.Left, c.Top, c.PlaneWidth, c.PlaneHeight,
-								   X, Y);
+								   L"TSMemory: 1 件目の位置 : 字幕平面 "
+								   L"左%d 中央%d 上%d / %dx%d -> X=%d Y=%d",
+								   c.Left, c.CenterX, c.Top,
+								   c.PlaneWidth, c.PlaneHeight, X, Y);
 				Log(szp);
 				if (g_State.CaptionDebug)
 					DumpObject(edit, o);

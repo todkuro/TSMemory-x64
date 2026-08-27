@@ -103,6 +103,9 @@ struct State {
 	int SpaceH = 4, SpaceV = 24;	// SHS / SVS : 字間・行間
 	int PlaneW = 960, PlaneH = 540;	// SWF : 字幕平面そのものの大きさ
 
+	//	ペンの位置。ACPS / APS で動き、文字を書くと 1 文字分進む
+	int PenX = -1;
+
 	//	今の文字の大きさ。0 標準 / 1 中型 / 2 小型 / 3 倍角。
 	//	**APS の行送りはこれで変わる。**小型の行に標準の送りを使うと、
 	//	画面の外を指す座標になる (実測: 区切りの行が y=990 になり、
@@ -195,9 +198,11 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 		if (Count >= 1) pSt->SpaceV = Param[0];
 		break;
 	case 0x61:		// ACPS : 表示位置 (ドット)
-		if (Count >= 2)
+		if (Count >= 2) {
+			pSt->PenX = Param[0];
 			PushSimple(pOut, AribItemType::Position, Param[0], Param[1],
 					   pSt->PitchY());
+		}
 		break;
 	default:
 		break;
@@ -205,17 +210,19 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	return i;
 }
 
-void PushText(std::vector<AribItem> *pOut, const std::wstring &s)
+void PushText(std::vector<AribItem> *pOut, const std::wstring &s, int PenX = -1)
 {
 	if (s.empty())
 		return;
 	if (!pOut->empty() && pOut->back().Type == AribItemType::Text) {
 		pOut->back().Text += s;
+		pOut->back().C = PenX;		// 書き終えた後のペンの X
 		return;
 	}
 	AribItem it;
 	it.Type = AribItemType::Text;
 	it.Text = s;
+	it.C = PenX;
 	pOut->push_back(it);
 }
 
@@ -317,14 +324,18 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				if (i + 1 < Size) {
 					const int Row = pData[i] & 0x3F;
 					const int Col = pData[i + 1] & 0x3F;
+					st.PenX = st.OrigX + Col * st.PitchX();
 					PushSimple(pOut, AribItemType::Position,
-							   st.OrigX + Col * st.PitchX(),
+							   st.PenX,
 							   st.OrigY + (Row + 1) * st.PitchY(),
 							   st.PitchY());
 				}
 				i += 2;
 				break;
-			case 0x20:	PushText(pOut, L" "); break;
+			case 0x20:
+				if (st.PenX >= 0) st.PenX += st.PitchX();
+				PushText(pOut, L" ", st.PenX);
+				break;
 			case 0x1B: {	// ESC
 				if (i >= Size) break;
 				const BYTE e = pData[i++];
@@ -432,18 +443,20 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			i += 2;
 
 			if (Set == CharSet::Drcs2) {
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2);
+				if (st.PenX >= 0) st.PenX += st.PitchX();
+				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0, st.PenX);
 				continue;
 			}
 			const int Ku = c1 - 0x20;
 			const int Ten = c2 - 0x20;
 			const std::wstring s = KuTenToText(Ku, Ten);
+			if (st.PenX >= 0) st.PenX += st.PitchX();
 			if (s.empty()) {
-				//	追加記号など Shift_JIS に無い物。外字と同じ扱いにして
+				//	表に無い区点。外字と同じ扱いにして
 				//	呼び出し側で判断出来るようにする
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2);
+				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0, st.PenX);
 			} else {
-				PushText(pOut, s);
+				PushText(pOut, s, st.PenX);
 			}
 			continue;
 		}
@@ -452,19 +465,24 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 		switch (Set) {
 		case CharSet::Alnum:
 			//	**英数は全角。**中型 (MSZ) の時に半角相当の見た目になる
-			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)));
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)), st.PenX);
 			break;
 		case CharSet::Hiragana:
-			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)));
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)), st.PenX);
 			break;
 		case CharSet::Katakana:
-			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)));
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)), st.PenX);
 			break;
 		case CharSet::JisKatakana:
-			PushText(pOut, OneByteToText(::TSMemoryAribJisKatakana(c1)));
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushText(pOut, OneByteToText(::TSMemoryAribJisKatakana(c1)), st.PenX);
 			break;
 		case CharSet::Drcs1:
-			PushSimple(pOut, AribItemType::Drcs, c1);
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushSimple(pOut, AribItemType::Drcs, c1, 0, st.PenX);
 			break;
 		case CharSet::Macro: {
 			//	**マクロは文字ではない。**中身は文字集合を割り当てる

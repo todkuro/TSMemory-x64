@@ -70,6 +70,13 @@ struct AribCaptionLine {
 	std::wstring Text;		// AviUtl2 のテキスト (改行は含まない)
 	int Left = -1;			// 字幕平面の中での左上 (ドット)
 	int Top = -1;
+	int Right = -1;			// 行の右端。**AviUtl2 は X が行の中央**な為に要る
+
+	//	行の中央 (ドット)。右端が判らなければ左端をそのまま返す
+	int CenterX() const
+	{
+		return (Right > Left) ? (Left + Right) / 2 : Left;
+	}
 };
 
 //	字幕が画面のどこに出るか。

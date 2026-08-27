@@ -509,7 +509,8 @@ void RunConvertTests()
 		std::vector<AribItem> Items;
 		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
 		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 509; p.C = 60;
-		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		//	Text の C は「書き終えた後のペンの X」。送り幅 40 で 1 文字
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ"; t.C = 240;
 		Items.push_back(g); Items.push_back(p); Items.push_back(t);
 		std::vector<int> Drcs;
 		AribCaptionLayout L;
@@ -520,6 +521,33 @@ void RunConvertTests()
 			  && L.Lines[0].Top == 509 + 1 - 60);
 		check("the caption plane size comes from the geometry",
 			  L.PlaneWidth == 960 && L.PlaneHeight == 540);
+		//	**AviUtl2 のテキストは X が行の中央**なので右端が要る。
+		//	実測 (X=-620 / サイズ 72 / 10 文字) で、左端ではなく
+		//	中央が指定した座標に来た
+		check("the line keeps its right edge for the centre",
+			  L.Lines[0].Right == 200 + 40
+			  && L.Lines[0].CenterX() == 200 + 20);
+	}
+
+	//	3h. 行の幅は「ペンの進み」で出す。文字数 x 送り幅
+	{
+		//	ACPS(100,509) の後に 3 文字。送り幅は 36+4 = 40
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x34, 0x20, 0x58,
+			0x9B, 0x31, 0x30, 0x30, 0x3B, 0x35, 0x30, 0x39, 0x20, 0x61,
+			0x24, 0x22, 0x24, 0x24, 0x24, 0x26,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("the pen advance gives the line width",
+			  L.Lines.size() == 1 && L.Lines[0].Left == 100
+			  && L.Lines[0].Right == 100 + 3 * 40);
 	}
 
 	//	3g. ルビの位置は無視する (本文の行だけを見る)
@@ -827,10 +855,11 @@ int main(int argc, char **argv)
 		if (k < Layouts.size()) {
 			//	1920x1080 に置いた時の左上 (画面中央が原点)
 			for (const AribCaptionLine &Line : Layouts[k].Lines) {
-				const int X = Line.Left * 1920 / Layouts[k].PlaneWidth - 960;
+				//	**X は行の中央**なので、そちらを出力の座標に直す
+				const int X = Line.CenterX() * 1920 / Layouts[k].PlaneWidth - 960;
 				const int Y = Line.Top * 1080 / Layouts[k].PlaneHeight - 540;
-				std::printf("  (%4d,%4d dots -> 1080p X=%d Y=%d)\n",
-							Line.Left, Line.Top, X, Y);
+				std::printf("  (左%3d 右%3d 中央%3d 上%3d dots -> 1080p X=%d Y=%d)\n",
+							Line.Left, Line.Right, Line.CenterX(), Line.Top, X, Y);
 			}
 		}
 		std::printf("  [%s]\n", u8.data());

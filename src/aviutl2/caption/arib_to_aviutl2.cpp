@@ -207,6 +207,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			BeginLine();
 			Flush();
 			Cur.Text += Escape(it.Text);
+			if (it.C > Cur.Right)
+				Cur.Right = it.C;
 			fAnyText = true;
 			break;
 
@@ -277,6 +279,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			Cur.Text += L">";
 			Cur.Text += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
 			Cur.Text += L"<@>";			// 元の書体に戻す
+			if (it.C > Cur.Right)
+				Cur.Right = it.C;
 			fAnyText = true;
 			break;
 		}

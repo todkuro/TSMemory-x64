@@ -239,16 +239,19 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		int Run = 0;
 		double Last = -1.0;
 		for (int i = 0; i < Source.GetCount(); i++) {
-			const double Sec = Source.Get(i).Seconds;
-			Run = (i > 0 && Sec == Last) ? Run + 1 : 1;
-			Last = Sec;
+			const TSMemoryCaption &c = Source.Get(i);
+			//	置かない物は数えない。数え過ぎると使いもしない
+			//	レイヤーを掃除してしまう
+			if (c.Text.empty() || c.Seconds < 0.0)
+				continue;
+			Run = (c.Seconds == Last) ? Run + 1 : 1;
+			Last = c.Seconds;
 			if (Run > MaxLines)
 				MaxLines = Run;
 		}
 	}
 	if (MaxLines > MAX_CAPTION_LAYERS)
 		MaxLines = MAX_CAPTION_LAYERS;
-	g_State.CaptionLayersUsed = MaxLines;
 
 	//	**映像のレイヤーに掛かってはいけない。**
 	//	行が増えると下へ伸びるので、範囲で見る
@@ -289,6 +292,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	int Placed = 0;
 	int Dropped = 0;
 	int LineIndex = 0;
+	int UsedLayers = 1;		// 実際に使った本数。ロックはこの範囲だけ
 	double LastSeconds = -1.0;
 	bool fPosOk = true;
 	bool fBackOk = true;
@@ -328,6 +332,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 			Dropped++;
 			continue;
 		}
+		if (LineIndex + 1 > UsedLayers)
+			UsedLayers = LineIndex + 1;
 
 		OBJECT_HANDLE o = edit->create_object(L"テキスト", Layer + LineIndex,
 											  Start, End - Start + 1);
@@ -409,11 +415,13 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		Placed++;
 	}
 
+	g_State.CaptionLayersUsed = UsedLayers;
+
 	WCHAR sz[224];
 	::StringCchPrintfW(sz, ARRAYSIZE(sz),
 					   L"TSMemory: 字幕を %d 件配置しました "
-					   L"(レイヤー %d-%d / 外字 %d 字形)",
-					   Placed, Layer + 1, Layer + MaxLines,
+					   L"(レイヤー %d-%d / 最大 %d 行 / 外字 %d 字形)",
+					   Placed, Layer + 1, Layer + UsedLayers, UsedLayers,
 					   Source.GetGlyphCount());
 	Log(sz);
 

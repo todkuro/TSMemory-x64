@@ -95,6 +95,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	int PendingY = -1;		// まだ本文が来ていない位置指定
 	int PendingX = -1;
 	int PendingPitch = 0;
+	int PendingPitchX = 0;
 	bool fAnyText = false;
 
 	int Color = -1, EmittedColor = -1;
@@ -118,7 +119,19 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		//	(実測: 行送り 60 で本文 y=509、その 1 行上のルビが y=449)
 		const int Top = PendingY + 1 - (PendingPitch > 0 ? PendingPitch : 60);
 		const int Threshold = (PendingPitch > 0) ? PendingPitch * 3 / 4 : 1;
-		if (fAnyText && BaseY >= 0 && PendingY - BaseY >= Threshold) {
+
+		//	**同じ高さで横に飛んだら、そこも別の行にする。**
+		//	ドラマやアニメで複数の話者を同時に別の場所へ出す時に起こる。
+		//	割らないと離れた場所の文字が 1 つのオブジェクトに繋がり、
+		//	間の空白が消えて背景の箱も両方をまたいでしまう
+		//	(実測: 放送 14 番組中 4 番組で発生)
+		const int GapX = (PendingPitchX > 0) ? PendingPitchX : 40;
+		const bool fRow = fAnyText && BaseY >= 0
+						  && PendingY - BaseY >= Threshold;
+		const bool fGap = fAnyText && BaseY >= 0 && PendingY == BaseY
+						  && Cur.Right > 0 && PendingX > Cur.Right + GapX;
+
+		if (fRow || fGap) {
 			//	**行が変わった。**ここで区切って別のオブジェクトにする
 			if (!Cur.Text.empty())
 				Lines.push_back(Cur);
@@ -291,6 +304,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			PendingX = it.A;
 			PendingY = it.B;
 			PendingPitch = it.C;
+			PendingPitchX = it.D;
 			break;
 
 		case AribItemType::ClearScreen:

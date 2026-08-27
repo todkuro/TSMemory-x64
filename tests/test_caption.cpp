@@ -529,6 +529,85 @@ void RunConvertTests()
 			  && L.Lines[0].CenterX() == 200 + 20);
 	}
 
+	//	3i. **3 行以上**。実放送に 3 行の字幕が在る (実測)。
+	//	   行ごとに座標を持ち、行ごとに 1 つのオブジェクトになる
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		Items.push_back(g);
+		const wchar_t *Text[3] = { L"あ", L"い", L"う" };
+		for (int n = 0; n < 3; n++) {
+			AribItem p; p.Type = AribItemType::Position;
+			p.A = 100; p.B = 389 + n * 60; p.C = 60;
+			AribItem t; t.Type = AribItemType::Text;
+			t.Text = Text[n]; t.C = 140;
+			Items.push_back(p); Items.push_back(t);
+		}
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("three lines become three objects", L.Lines.size() == 3);
+		bool fOk = (L.Lines.size() == 3);
+		for (size_t n = 0; fOk && n < 3; n++) {
+			fOk = fOk && L.Lines[n].Top == 330 + static_cast<int>(n) * 60
+				  && L.Lines[n].Left == 100
+				  && L.Lines[n].Text == std::wstring(L"<$字幕>") + Text[n];
+		}
+		check("each line keeps its own position and text", fOk);
+	}
+
+	//	3j. **同じ高さで横に飛んだら別の行にする。**
+	//	   ドラマやアニメで複数の話者を同時に別の場所へ出す時に起こる
+	//	   (実測: 放送 14 番組中 4 番組で発生)
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		Items.push_back(g);
+
+		//	左は x=60 に 2 文字、右は x=500 に 2 文字。高さは同じ
+		const int X[2] = { 60, 500 };
+		const wchar_t *T[2] = { L"あ", L"い" };
+		for (int n = 0; n < 2; n++) {
+			AribItem p; p.Type = AribItemType::Position;
+			p.A = X[n]; p.B = 509; p.C = 60; p.D = 40;
+			AribItem t; t.Type = AribItemType::Text;
+			t.Text = T[n]; t.C = X[n] + 40;
+			Items.push_back(p); Items.push_back(t);
+		}
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("a jump to the right on the same row splits the line",
+			  L.Lines.size() == 2
+			  && L.Lines[0].Left == 60 && L.Lines[1].Left == 500
+			  && L.Lines[0].Top == L.Lines[1].Top);
+	}
+
+	//	3k. 続けて書いただけなら割らない (同じ行のまま)
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		AribItem p; p.Type = AribItemType::Position;
+		p.A = 60; p.B = 509; p.C = 60; p.D = 40;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ"; t.C = 100;
+		//	書き終えた所のすぐ隣に置き直す
+		AribItem p2 = p; p2.A = 100;
+		AribItem t2; t2.Type = AribItemType::Text; t2.Text = L"い"; t2.C = 140;
+		Items.push_back(g); Items.push_back(p); Items.push_back(t);
+		Items.push_back(p2); Items.push_back(t2);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("writing on beyond the pen stays one line",
+			  L.Lines.size() == 1 && L.Lines[0].Text == L"<$字幕>あい");
+	}
+
 	//	3h. 行の幅は「ペンの進み」で出す。文字数 x 送り幅
 	{
 		//	ACPS(100,509) の後に 3 文字。送り幅は 36+4 = 40
@@ -784,6 +863,13 @@ int main(int argc, char **argv)
 
 	//	--- 復号 -------------------------------------------------------------
 	int Decoded = 0, WithText = 0, DrcsRefs = 0, Positions = 0, Colors = 0;
+	//	**同じ高さで横に離れた位置に書き直した回数。**
+	//	複数の話者を同時に別の場所へ出す字幕で起こる。
+	//	行の区切りを Y だけで見ていると 1 行に繋がってしまう
+	int SideBySide = 0;
+	//	変換の結果、同じ高さで 2 つ以上の行に割れた回数
+	int SplitSameRow = 0;
+	int TotalLines = 0;
 	size_t TotalChars = 0;
 	std::vector<std::wstring> Samples, Converted;
 	std::vector<AribCaptionLayout> Layouts;
@@ -795,10 +881,36 @@ int main(int argc, char **argv)
 		AribDecodeText(u.Body.data(), u.Body.size(), &Items);
 		Decoded++;
 
+		int PrevY = -1, Pen = -1;
 		for (const AribItem &it : Items) {
 			if (it.Type == AribItemType::Drcs) DrcsRefs++;
-			if (it.Type == AribItemType::Position) Positions++;
 			if (it.Type == AribItemType::Color) Colors++;
+			if (it.Type == AribItemType::Text || it.Type == AribItemType::Drcs) {
+				if (it.C > 0)
+					Pen = it.C;
+			}
+			if (it.Type != AribItemType::Position)
+				continue;
+			Positions++;
+			//	**同じ高さで、書き終えた所より右へ飛んだ。**
+			//	複数の話者を同時に別の場所へ出す字幕で起こる
+			if (PrevY >= 0 && it.B == PrevY && Pen > 0 && it.A > Pen + 40)
+				SideBySide++;
+			PrevY = it.B;
+			Pen = it.A;
+		}
+
+		//	**全ての字幕文について**行の割れ方を数える (表示は先頭 12 件だけ)
+		{
+			AribToAviUtl2Options o;
+			std::vector<int> Codes;
+			AribCaptionLayout L;
+			AribItemsToAviUtl2(Items, o, &Codes, &L);
+			TotalLines += static_cast<int>(L.Lines.size());
+			for (size_t n = 1; n < L.Lines.size(); n++) {
+				if (L.Lines[n].Top == L.Lines[n - 1].Top)
+					SplitSameRow++;
+			}
 		}
 
 		const std::wstring s = AribItemsToPlainText(Items);
@@ -824,7 +936,11 @@ int main(int argc, char **argv)
 	}
 
 	std::printf("decoded %d units : 本文あり %d / 文字数 %zu\n", Decoded, WithText, TotalChars);
-	std::printf("  制御 : 位置 %d / 色 %d / 外字 %d\n\n", Positions, Colors, DrcsRefs);
+	std::printf("  制御 : 位置 %d / 色 %d / 外字 %d"
+				" / 同じ高さで横に飛んだ %d\n",
+				Positions, Colors, DrcsRefs, SideBySide);
+	std::printf("  行 : 合計 %d / うち同じ高さで割れた %d\n\n",
+				TotalLines, SplitSameRow);
 
 	//	本文はあるが画面消去だけ、という区間もある (短い切り出しで起こる)
 	if (WithText == 0) {

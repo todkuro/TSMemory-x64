@@ -131,7 +131,7 @@ struct State {
 
 
 void PushSimple(std::vector<AribItem> *pOut, AribItemType Type,
-				int A = 0, int B = 0, int C = 0);
+				int A = 0, int B = 0, int C = 0, int D = 0);
 
 //	CSI の引数は 0x30-0x39 と 0x3B が続き、0x20 + 終端バイトで終わる。
 //
@@ -201,7 +201,7 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 		if (Count >= 2) {
 			pSt->PenX = Param[0];
 			PushSimple(pOut, AribItemType::Position, Param[0], Param[1],
-					   pSt->PitchY());
+					   pSt->PitchY(), pSt->PitchX());
 		}
 		break;
 	default:
@@ -226,13 +226,15 @@ void PushText(std::vector<AribItem> *pOut, const std::wstring &s, int PenX = -1)
 	pOut->push_back(it);
 }
 
-void PushSimple(std::vector<AribItem> *pOut, AribItemType Type, int A, int B, int C)
+void PushSimple(std::vector<AribItem> *pOut, AribItemType Type,
+				int A, int B, int C, int D)
 {
 	AribItem it;
 	it.Type = Type;
 	it.A = A;
 	it.B = B;
 	it.C = C;
+	it.D = D;
 	pOut->push_back(it);
 }
 
@@ -328,7 +330,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					PushSimple(pOut, AribItemType::Position,
 							   st.PenX,
 							   st.OrigY + (Row + 1) * st.PitchY(),
-							   st.PitchY());
+							   st.PitchY(), st.PitchX());
 				}
 				i += 2;
 				break;

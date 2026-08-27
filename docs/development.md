@@ -2132,16 +2132,21 @@ AviUtl2 のテキスト制御文字が ARIB 字幕の表現とほぼ対応する
 やっている事:
 
 ```lua
-obj.copybuffer("cache:...", "object")   -- テキストを退避 (先に w/h を取る)
-obj.load("figure", "四角形", 色, size, 0, 角丸, aspect)
-obj.draw(0, 0, 0, 1.0, 不透明度)        -- 背景
-obj.copybuffer("object", "cache:...")   -- テキストを戻す
-obj.draw()                              -- 上に重ねる
+obj.copybuffer(text, "object")            -- テキストを退避 (先に w/h を取る)
+obj.clearbuffer(box, bw, bh, 色)          -- 箱を単色で作る
+obj.setoption("drawtarget", "tempbuffer", bw, bh)
+obj.copybuffer("object", box);  obj.draw(0,0,0,1.0, 不透明度)
+obj.copybuffer("object", text); obj.draw(0,0,0,1.0, 1.0)
+obj.setoption("drawtarget", "framebuffer")
+obj.copybuffer("object", "tempbuffer")    -- 合成結果をオブジェクトに
 ```
 
-四角形は正方形で作られるので、長い方を `size` にして `aspect` で潰す
-(プラス = 横を縮める / マイナス = 縦を縮める)。1 ドットの板を
-`drawpoly()` で伸ばす手もあるが、それだと角丸が保てない。
+**箱は `obj.clearbuffer(target, w, h, color)` で作る。**
+`obj.load("figure","四角形",...)` は使わない。図形の名前が本当に
+通っているかを確かめる術が無く、実機で楕円のような輪郭が出ていた
+(`figure=true` が返っても、何が読まれたかは判らない)。
+`clearbuffer` なら「指定の大きさを単色で塗り潰したバッファ」が
+そのまま得られる。伸ばす必要も無いので縦横比の指定も要らない。
 
 **`obj.draw()` を呼んだ後は自動描画されない**ので、テキストも自分で描く。
 

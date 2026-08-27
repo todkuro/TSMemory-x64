@@ -28,18 +28,18 @@
 	このスクリプトは描画後の obj.w / obj.h を見るので、
 	書体・サイズ・文言を変えても箱が付いて来る。
 
+	**箱は obj.clearbuffer() で作る。obj.load("figure") は使わない。**
+	図形の名前が本当に「四角形」で通っているかを確かめる術が無く、
+	実機で楕円のような輪郭が出ていた。clearbuffer なら
+	「指定の大きさを単色で塗り潰したバッファ」がそのまま得られる。
+	伸ばす必要も無いので縦横比の指定も要らない。
+
 	**フレームバッファに直接 obj.draw() してはいけない。**
 	「obj.draw() を使用した場合スクリプト以降のフィルタ効果は
 	実行されません」(lua.txt) ので、後ろにある標準描画が飛ばされ、
 	オブジェクトの X/Y も拡大率も効かなくなる。
 	仮想バッファの中で合成してオブジェクトに書き戻し、
 	描画そのものは本体に任せる。
-
-	**図形は 4 引数までしか渡さない。**
-	obj.load("figure",name,color,size,line,round,aspect) と説明されているが、
-	同じ説明の例が `obj.load("figure","円",0xffffff,100,true)` と
-	5 番目に true を渡しており、line 以降の解釈が怪しい。
-	大きさは drawpoly で伸ばす方が確実で、縦横比の指定も要らない。
 
 	**デバッグ表示は print()。**obj.mes() はログではなく
 	「テキストオブジェクトのテキストに文字を挿入する」関数なので、
@@ -51,8 +51,8 @@
 	不透明度の既定 50 は ARIB の色表の索引 65 = (0,0,0,α128) に合わせた値。
 ]]
 
---	**先に取っておく事。**obj.load() を呼ぶと画像が図形に差し替わり、
---	合成の後は余白のぶん大きくなる。位置合わせに使うのは文字の幅
+--	**先に取っておく事。**合成の後は余白のぶん大きくなるので、
+--	位置合わせに使うのは文字の幅
 local w = obj.w
 local h = obj.h
 
@@ -65,33 +65,24 @@ if dbg == 1 then
 end
 
 if w > 0 and h > 0 and alpha > 0 then
-	local saved = "cache:tsmemory_caption_bg"
-	obj.copybuffer(saved, "object")
-
 	local bw = w + padx * 2
 	local bh = h + pady * 2
+	local text = "cache:tsmemory_caption_text"
+	local box  = "cache:tsmemory_caption_box"
+
+	obj.copybuffer(text, "object")
+	--	箱を「その大きさの単色バッファ」として直接作る
+	obj.clearbuffer(box, bw, bh, bgcol)
 
 	--	仮想バッファの中で「背景 + テキスト」を組み立てる。
 	--	仮想バッファへの描画はオブジェクトの座標を反映せず、
 	--	引数の座標そのままで描かれる (中心が 0,0)
 	obj.setoption("drawtarget", "tempbuffer", bw, bh)
 
-	--	単色の板を読み込んで、drawpoly で箱の大きさに伸ばす
-	local ok = obj.load("figure", "四角形", bgcol, 100)
-	if dbg == 1 then
-		print("TSMemory字幕背景: figure=" .. tostring(ok)
-			  .. " -> " .. obj.w .. "x" .. obj.h
-			  .. " box=" .. bw .. "x" .. bh)
-	end
+	obj.copybuffer("object", box)
+	obj.draw(0, 0, 0, 1.0, alpha / 100)
 
-	local x0, y0 = -bw / 2, -bh / 2
-	local x1, y1 =  bw / 2,  bh / 2
-	obj.drawpoly(x0, y0, 0,  x1, y0, 0,  x1, y1, 0,  x0, y1, 0,
-				 0, 0,  obj.w, 0,  obj.w, obj.h,  0, obj.h,
-				 alpha / 100)
-
-	--	テキストを戻して上に重ねる
-	obj.copybuffer("object", saved)
+	obj.copybuffer("object", text)
 	obj.draw(0, 0, 0, 1.0, 1.0)
 
 	obj.setoption("drawtarget", "framebuffer")

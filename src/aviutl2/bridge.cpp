@@ -54,6 +54,9 @@ struct BridgeState {
 	bool CaptionBroadcastSize = false;    // 放送の文字の大きさに合わせるか
 	bool CaptionPosition = true;          // 放送の位置に合わせるか
 	int CaptionBackOpacity = 50;          // 背景の不透明度 (0 で背景なし)
+	int CaptionBackPaddingX = 8;          // 背景の余白 (字幕平面のドット基準)
+	int CaptionBackPaddingY = 4;
+	bool CaptionBackDebug = false;        // スクリプト側の切り分け出力
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
 	bool CaptionDebug = false;            // 1 件目のオブジェクトの中身をログに出す
 	int CaptionOffsetX = 0;               // 位置の微調整 (ピクセル)
@@ -332,9 +335,19 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 			if (e == nullptr) {
 				fBackOk = false;
 			} else {
+				//	**項目は全てここで入れ直す。**
+				//	%ProgramData%viutl2\Default\<名前>.effect が
+				//	あると、スクリプトの --track@ の既定より
+				//	そちらが優先される。黙って別の値で動くのを防ぐ
 				char szv[16];
 				::wsprintfA(szv, "%d", g_State.CaptionBackOpacity);
 				edit->set_effect_item_value(e, L"不透明度", szv);
+				::wsprintfA(szv, "%d", g_State.CaptionBackPaddingX);
+				edit->set_effect_item_value(e, L"横余白", szv);
+				::wsprintfA(szv, "%d", g_State.CaptionBackPaddingY);
+				edit->set_effect_item_value(e, L"縦余白", szv);
+				edit->set_effect_item_value(e, L"デバッグ表示",
+										   g_State.CaptionBackDebug ? "1" : "0");
 			}
 		}
 
@@ -678,6 +691,12 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackOpacity", 50, ini_file);
 		g_State.CaptionDebug =
 			::GetPrivateProfileIntW(L"Caption", L"Debug", 0, ini_file) != 0;
+		g_State.CaptionBackPaddingX =
+			::GetPrivateProfileIntW(L"Caption", L"BackPaddingX", 8, ini_file);
+		g_State.CaptionBackPaddingY =
+			::GetPrivateProfileIntW(L"Caption", L"BackPaddingY", 4, ini_file);
+		g_State.CaptionBackDebug =
+			::GetPrivateProfileIntW(L"Caption", L"BackDebug", 0, ini_file) != 0;
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"BackScript",

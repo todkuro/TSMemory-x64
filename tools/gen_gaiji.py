@@ -62,6 +62,63 @@ def read_macros(path):
 REPLACEMENT = 0xFFFD
 
 
+def is_halfwidth(cp):
+    """半角の文字か。libaribcaption src/base/unicode_helper.hpp と同じ判定"""
+    return ((cp != 0 and cp <= 0xFF)
+            or 0xFF61 <= cp <= 0xFF9F
+            or 0xFFE8 <= cp <= 0xFFEE)
+
+
+def build_halfwidth(conv_h, kanji, singles):
+    """全角 -> 半角の対応を作る。
+
+    ARIB の「中型 (MSZ)」は字を横に潰す指定ではなく、**その字の半角形を
+    使う**指定。潰すと `。` の丸が楕円になる (実機で発生)。
+    libaribcaption も decoder_impl.cpp で
+    `char_horizontal_scale_ * 2 == char_vertical_scale_` の時に
+    半角の表へ差し替えている。ここではその対応だけを取り出す。
+
+    どの文字集合から来たかに関わらず引けるよう、
+    「全角の符号位置 -> 半角の符号位置」の 1 つの表にまとめる。
+    """
+    pairs = [
+        #	区 1-2 の記号 (kKanjiTable の先頭 188 文字)
+        (kanji[:2 * 94], read_u32_array(conv_h, "kKanjiSymbolsTable_Halfwidth")),
+        #	ひらがな・カタカナの末尾 6 文字 (符号 0x79 以降)
+        (singles["Hiragana"][0x79 - 0x21:],
+         read_u32_array(conv_h, "kKanaSymbolsTable_Halfwidth")),
+        (singles["Katakana"][0x79 - 0x21:],
+         read_u32_array(conv_h, "kKanaSymbolsTable_Halfwidth")),
+        #	**JIS X 0201 片仮名はここに入れない。**
+        #	この表だけは全角の片仮名を丸ごと半角に写す。混ぜると
+        #	片仮名集合 (ESC 0x31) から来た「ア」まで半角になってしまう。
+        #	libaribcaption も文字集合ごとに使う表を分けており、
+        #	片仮名集合では符号 0x79 以降の記号しか差し替えない。
+        #	JIS X 0201 片仮名の分は TSMemoryAribJisKatakanaHalf で引く
+        #	全角英数 -> ASCII
+        (singles["Alnum"],
+         read_u32_array(conv_h, "kAlphanumericTable_Halfwidth")),
+    ]
+
+    out = {}
+    for full, halfwidth in pairs:
+        for f, h in zip(full, halfwidth):
+            if f in (0, REPLACEMENT) or h in (0, REPLACEMENT):
+                continue
+            if f == h or f >= 0x10000 or h >= 0x10000:
+                continue
+            if f in out and out[f] != h:
+                #	**文字集合ごとに違う半角形を持つ字がある。**
+                #	例: ￣ (U+FFE3) は区 1 の表では U+00AF、英数の表では
+                #	U+203E。半角と判定される方を採る。どちらも半角
+                #	(あるいはどちらも違う) なら先に入った方を残す
+                if is_halfwidth(h) and not is_halfwidth(out[f]):
+                    out[f] = h
+                continue
+            out[f] = h
+    return sorted(out.items())
+
+
 def to_utf16(cp):
     """Unicode の符号位置を UTF-16 のコード単位にする"""
     if cp == 0 or cp == REPLACEMENT:
@@ -93,12 +150,18 @@ def main():
         ("Hiragana", "kHiraganaTable"),
         ("Katakana", "kKatakanaTable"),
         ("JisKatakana", "kJISX0201KatakanaTable"),
+        #	**JIS X 0201 片仮名だけは半角形の表も持つ。**
+        #	この文字集合はもともと半角の片仮名で、中型 (MSZ) の時は
+        #	丸ごと半角に写す。全角の片仮名集合とは扱いが違う
+        ("JisKatakanaHalf", "kJISX0201KatakanaTable_Halfwidth"),
     ]
     single_tables = [(name, read_u32_array(conv_h, sym)) for name, sym in singles]
     for name, v in single_tables:
         if len(v) != 94:
             raise SystemExit("%s が 94 個ではありません: %d" % (name, len(v)))
     gaiji = read_u32_array(gaiji_h, "kAdditionalSymbolsTable_Unicode")
+
+    half = build_halfwidth(conv_h, kanji, dict(single_tables))
 
     #	区 1-84 が kKanjiTable、区 85-94 が追加表。どちらも 94 点ずつ
     if len(kanji) < 84 * 94:
@@ -174,9 +237,24 @@ def main():
     w("//")
     w("//\t**区 4 / 区 5 で代用してはいけない。**末尾に「ー」「、」等が")
     w("//\t入っており、区で引くと落ちる (実測: ステーション -> ステション)。")
-    w("//\t英数は全角。中型 (MSZ) の時に半角相当の見た目になる")
+    w("//\t英数は全角。中型 (MSZ) の時に半角へ差し替える")
     for name, _ in singles:
         w("WCHAR TSMemoryArib%s(BYTE Code);" % name)
+    w("")
+    w("//\t全角の文字を半角に直す。対応が無ければ 0 を返す (%d 文字)。" % len(half))
+    w("//")
+    w("//\t**中型 (MSZ) は「横に潰す」指定ではない。**")
+    w("//\tその字の半角形を使うという意味で、潰すと `。` の丸が")
+    w("//\t楕円になる (実機で発生)。libaribcaption も")
+    w("//\tdecoder_impl.cpp で横倍率が縦の半分の時に半角の表へ")
+    w("//\t差し替えており、描画側は半角になった字に横倍率を掛けない")
+    w("//\t(text_renderer_directwrite.cpp の needless_horizontal_scaling)。")
+    w("WCHAR TSMemoryAribHalfwidth(WCHAR c);")
+    w("")
+    w("//\t既に半角の字か。libaribcaption の")
+    w("//\tsrc/base/unicode_helper.hpp IsHalfwidthCharacter と同じ判定。")
+    w("//\t**これが真なら横倍率を掛けてはいけない**")
+    w("bool TSMemoryAribIsHalfwidth(WCHAR c);")
     w("")
     w("//\tARIB の色表 (128 色)。色番号は「色配列 * 16 + 番号」。")
     w("//")
@@ -301,9 +379,43 @@ def main():
         w("\treturn Table[Code - 0x21];")
         w("}")
 
+    #	--- 全角 -> 半角 -----------------------------------------------------
+    w("")
+    w("")
+    w("WCHAR TSMemoryAribHalfwidth(WCHAR c)")
+    w("{")
+    w("\t//\t{ 全角, 半角 } を符号順に並べた物。二分探索で引く")
+    w("\tstatic const WCHAR Table[][2] = {")
+    for i in range(0, len(half), 6):
+        w("\t\t" + " ".join("{0x%04X,0x%04X}," % p for p in half[i:i + 6]))
+    w("\t};")
+    w("")
+    w("\tint Lo = 0, Hi = %d;" % len(half))
+    w("\twhile (Lo < Hi) {")
+    w("\t\tconst int Mid = (Lo + Hi) / 2;")
+    w("\t\tif (Table[Mid][0] == c)")
+    w("\t\t\treturn Table[Mid][1];")
+    w("\t\tif (Table[Mid][0] < c)")
+    w("\t\t\tLo = Mid + 1;")
+    w("\t\telse")
+    w("\t\t\tHi = Mid;")
+    w("\t}")
+    w("\treturn 0;")
+    w("}")
+    w("")
+    w("")
+    w("bool TSMemoryAribIsHalfwidth(WCHAR c)")
+    w("{")
+    w("\treturn (c != 0 && c <= 0xFF)")
+    w("\t\t|| (c >= 0xFF61 && c <= 0xFF9F)")
+    w("\t\t|| (c >= 0xFFE8 && c <= 0xFFEE);")
+    w("}")
+
     open(cpp, "w", encoding="utf-8", newline="\n").write("\n".join(lines) + "\n")
 
     print("区点 %d 個中 %d 個が定義されています" % (len(table), defined))
+    print("全角 -> 半角 の対応 %d 文字 (うち半角判定を通る物 %d)"
+          % (len(half), sum(1 for _, h in half if is_halfwidth(h))))
     print("  %s" % out)
     print("  %s" % cpp)
 

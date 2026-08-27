@@ -328,7 +328,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			case 0x20:
 				//	**空白も 1 文字分の枠を占める。**半角の空白にすると
 				//	送り幅と合わず、その行だけ詰まって見える。
-				//	中型の時は <tw0.5> が掛かるので半角相当になる
+				//	中型の時は変換側が半角の空白に差し替える
 				if (st.PenX >= 0) st.PenX += st.PitchX();
 				PushText(pOut, L"　", st.PenX);
 				break;
@@ -472,7 +472,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 		i++;
 		switch (Set) {
 		case CharSet::Alnum:
-			//	**英数は全角。**中型 (MSZ) の時に半角相当の見た目になる
+			//	**英数は全角。**中型 (MSZ) の時は変換側が半角に差し替える
 			if (st.PenX >= 0) st.PenX += st.PitchX();
 			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)), st.PenX);
 			break;
@@ -485,8 +485,16 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)), st.PenX);
 			break;
 		case CharSet::JisKatakana:
+			//	**この文字集合だけは中型 (MSZ) で丸ごと半角に写す。**
+			//	もともと半角の片仮名の集合であり、全角の片仮名集合
+			//	(ESC 0x31) とは扱いが違う。全角のまま <tw0.5> で
+			//	潰すと字形が歪む。libaribcaption も同じ分け方をしている
 			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribJisKatakana(c1)), st.PenX);
+			PushText(pOut,
+					 OneByteToText(st.ScaleH * 2 == st.ScaleV
+								   ? ::TSMemoryAribJisKatakanaHalf(c1)
+								   : ::TSMemoryAribJisKatakana(c1)),
+					 st.PenX);
 			break;
 		case CharSet::Drcs1:
 			if (st.PenX >= 0) st.PenX += st.PitchX();

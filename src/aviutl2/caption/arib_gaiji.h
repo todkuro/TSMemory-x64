@@ -41,11 +41,27 @@ const BYTE *TSMemoryAribDefaultMacro(int Index, int *pLength);
 //
 //	**区 4 / 区 5 で代用してはいけない。**末尾に「ー」「、」等が
 //	入っており、区で引くと落ちる (実測: ステーション -> ステション)。
-//	英数は全角。中型 (MSZ) の時に半角相当の見た目になる
+//	英数は全角。中型 (MSZ) の時に半角へ差し替える
 WCHAR TSMemoryAribAlnum(BYTE Code);
 WCHAR TSMemoryAribHiragana(BYTE Code);
 WCHAR TSMemoryAribKatakana(BYTE Code);
 WCHAR TSMemoryAribJisKatakana(BYTE Code);
+WCHAR TSMemoryAribJisKatakanaHalf(BYTE Code);
+
+//	全角の文字を半角に直す。対応が無ければ 0 を返す (115 文字)。
+//
+//	**中型 (MSZ) は「横に潰す」指定ではない。**
+//	その字の半角形を使うという意味で、潰すと `。` の丸が
+//	楕円になる (実機で発生)。libaribcaption も
+//	decoder_impl.cpp で横倍率が縦の半分の時に半角の表へ
+//	差し替えており、描画側は半角になった字に横倍率を掛けない
+//	(text_renderer_directwrite.cpp の needless_horizontal_scaling)。
+WCHAR TSMemoryAribHalfwidth(WCHAR c);
+
+//	既に半角の字か。libaribcaption の
+//	src/base/unicode_helper.hpp IsHalfwidthCharacter と同じ判定。
+//	**これが真なら横倍率を掛けてはいけない**
+bool TSMemoryAribIsHalfwidth(WCHAR c);
 
 //	ARIB の色表 (128 色)。色番号は「色配列 * 16 + 番号」。
 //

@@ -46,6 +46,7 @@
 !/tests/tools/ts-services.py
 !/tests/tools/analyze-levels.py
 !/tests/tools/mft-probe.cpp
+!/tests/tools/font-probe.cpp
 !/tests/tools/m2v-profile.cpp
 !/tests/tools/m2v-profile.sh
 !/tests/tools/fuzz-locate.cpp

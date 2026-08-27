@@ -123,6 +123,11 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	int BaseSize = 0;
 	bool fSizeEmitted = false;
 
+	//	**これから書く一続きの文字が既に半角かどうか。**
+	//	真なら横倍率 <tw> を掛けない。中型 (MSZ) は「横に潰す」ではなく
+	//	「半角形を使う」指定で、潰すと `。` の丸が楕円になる (実機で発生)
+	bool fRunHalfwidth = false;
+
 	//	本文を出す直前に呼ぶ。行が変わっていたら改行を入れる
 	auto NewLine = [&]() {
 		if (PendingY < 0)
@@ -199,7 +204,12 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			EmittedColor = Color;
 			EmittedBack = Back;
 		}
-		if (ScaleH != EmittedH || ScaleV != EmittedV
+		//	**半角に差し替えられた文字には横倍率を掛けない。**
+		//	字形がもともと半分の幅なので、更に潰すと歪む
+		//	(libaribcaption の needless_horizontal_scaling と同じ判断)
+		const int EffH = fRunHalfwidth ? ScaleV : ScaleH;
+
+		if (EffH != EmittedH || ScaleV != EmittedV
 				|| (BaseSize > 0 && !fSizeEmitted)) {
 			//	**縦のスケールは <s> (文字サイズ) で、横との差だけを
 			//	<tw> (横スケール) で出す。**<s> は縦横の両方に効くので、
@@ -228,31 +238,61 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			}
 
 			//	横は縦との比。縦横が同じなら <s> で足りている
-			if (ScaleH != ScaleV) {
+			if (EffH != ScaleV) {
 				Cur.Text += L"<tw";
-				Cur.Text += ScaleName(ScaleH * 10 / ScaleV);
+				Cur.Text += ScaleName(EffH * 10 / ScaleV);
 				Cur.Text += L">";
 			} else if (EmittedH != EmittedV) {
 				Cur.Text += L"<tw>";		// 横だけ伸縮していたのを戻す
 			}
 
 			fSizeEmitted = true;
-			EmittedH = ScaleH;
+			EmittedH = EffH;
 			EmittedV = ScaleV;
 		}
 	};
 
 	for (const AribItem &it : Items) {
 		switch (it.Type) {
-		case AribItemType::Text:
+		case AribItemType::Text: {
 			NewLine();
 			BeginLine();
-			Flush();
-			Cur.Text += Escape(it.Text);
+
+			//	**中型 (MSZ) は「横に潰す」ではなく「半角形を使う」指定。**
+			//	`。` を <tw0.5> で潰すと丸が楕円になる (実機で発生)。
+			//	半角形のある字はそちらに差し替え、その字には <tw> を
+			//	掛けない。半角形の無い字は従来通り横半分に潰す。
+			//	1 つの指定の中に両方が混ざる事があるので、
+			//	半角になったかどうかで区切って別々に出す
+			const bool fMsz = (ScaleH * 2 == ScaleV);
+			const std::wstring &s = it.Text;
+			size_t n = 0;
+			while (n < s.size()) {
+				std::wstring Group;
+				bool fHalf = false;
+				for (bool fFirst = true; n < s.size(); fFirst = false) {
+					const WCHAR c = s[n];
+					const WCHAR h = fMsz ? ::TSMemoryAribHalfwidth(c) : 0;
+					const WCHAR o = (h != 0) ? h : c;
+					const bool f = fMsz && ::TSMemoryAribIsHalfwidth(o);
+					if (fFirst)
+						fHalf = f;
+					else if (f != fHalf)
+						break;
+					Group += o;
+					n++;
+				}
+				fRunHalfwidth = fHalf;
+				Flush();
+				Cur.Text += Escape(Group);
+			}
+			fRunHalfwidth = false;
+
 			if (it.C > Cur.Right)
 				Cur.Right = it.C;
 			fAnyText = true;
 			break;
+		}
 
 		case AribItemType::LineBreak:
 			//	放送はまず送って来ないが、来たら行を切る

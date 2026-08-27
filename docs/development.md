@@ -1782,6 +1782,8 @@ H.264 / H.265 に対応する場合、音声 (AAC) と同じく Media Foundation
 環境で変わる**ので、推測せずに列挙して確かめる。
 
 ```bash
+export PATH="$PWD/compilers/llvm-mingw/bin:$PATH"
+clang++ -O1 -o build/tests/mft-probe.exe tests/tools/mft-probe.cpp -lmfplat -lmfuuid -lole32
 build/tests/mft-probe.exe
 ```
 
@@ -1803,6 +1805,44 @@ build/tests/mft-probe.exe
 
 `MFTEnumEx` は見つからなくても `S_OK` を返す。**戻り値ではなく
 個数で判定する事。**
+
+## 書体名を空にした時に選ばれる書体 (tests/tools/font-probe)
+
+TVCaptionMod2 と見比べる時に、向こうが何の書体で描いているかが要る。
+`FaceName` を空にすると readme には「適当な等幅フォント」としか
+書かれておらず、実装 (`src/TVCaption2.cpp` `AddOsdText`) も
+
+```cpp
+logFont.lfCharSet        = DEFAULT_CHARSET;
+logFont.lfPitchAndFamily = (faceName[0]?DEFAULT_PITCH:FIXED_PITCH) | FF_DONTCARE;
+_tcscpy_s(logFont.lfFaceName, faceName);   // 空
+```
+
+と GDI のフォントマッパー任せなので、**固定の名前は無い**。
+同じ条件で作って `GetTextFace()` で引く。
+
+```bash
+export PATH="$PWD/compilers/llvm-mingw/bin:$PATH"
+clang++ -O1 -o build/tests/font-probe.exe tests/tools/font-probe.cpp -lgdi32 -luser32
+build/tests/font-probe.exe
+```
+
+実測 (Windows 11 Pro 26200):
+
+```
+  FIXED_PITCH   (TVCaptionMod2) : ＭＳ ゴシック
+  FIXED_PITCH   +SHIFTJIS      : ＭＳ ゴシック
+  DEFAULT_PITCH                : ＭＳ Ｐゴシック
+  VARIABLE_PITCH               : ＭＳ Ｐゴシック
+```
+
+**ＭＳ ゴシック**が選ばれる。ARIB 外字は入っていないので、
+TVCaptionMod2 の readme が和田研ゴシック2004ARIB や
+Windows TV ゴシックを勧めているのはその為。
+
+なお TVCaptionMod2 は `lfWidth` に文字幅を直接与えており
+(`logFont.lfWidth = charWidth / 2`)、AviUtl2 の `<tw>` のような
+字形の変形はしていない。
 
 ## 速度の調査 (tests/tools/m2v-profile)
 
@@ -2185,7 +2225,7 @@ A = 横スケール / B = 縦スケール (どちらも 10 倍した整数) に�
 | | 横 | 縦 | 出す制御文字 |
 | --- | --- | --- | --- |
 | SSZ 小型 | 0.5 | 0.5 | `<s><s*0.5>` |
-| MSZ 中型 | 0.5 | 1.0 | `<tw0.5>` |
+| MSZ 中型 | 0.5 | 1.0 | 半角形に差し替え。無ければ `<tw0.5>` (下記) |
 | NSZ 標準 | 1.0 | 1.0 | (戻す時だけ `<s>` `<tw>`) |
 | SZX 0x41 | 1.0 | 2.0 | `<s><s*2><tw0.5>` |
 | SZX 0x44 | 2.0 | 1.0 | `<tw2>` |
@@ -2205,6 +2245,73 @@ A = 横スケール / B = 縦スケール (どちらも 10 倍した整数) に�
   `90 20 44` (22 件) と `90 20 40` (4 件) の 2 種類しか現れず、
   番組をまたいで同じ値だった。話者ごとに変わる色ではない。
   直した後は白 (ナレーション) と黄・シアン (話者) が正しく出る。
+
+#### 中型 (MSZ) は「横に潰す」ではなく「半角形を使う」
+
+`<tw0.5>` に直した後も、**`。` の丸が楕円に潰れていた** (実機。
+TVCaptionMod2 では丸いまま)。`<tw>` は字形そのものを横に縮める
+アフィン変換なので、真円が楕円になる。
+
+**ARIB の中型はそういう指定ではない。**「その字の半角形を使う」
+という意味で、`。` なら半角の `｡` (U+FF61) を等倍で描く。
+原典の実装も両方ともそうなっていた。
+
+libaribcaption `src/decoder/decoder_impl.cpp` — 横倍率が縦の半分
+(= 中型) の時に半角の表へ差し替える:
+
+```cpp
+// If [request replace MSZ fullwidth Japanese] && [under MSZ mode]
+if (replace_msz_fullwidth_ja_ && char_horizontal_scale_ * 2 == char_vertical_scale_) {
+    if (ku < 2) { ucs4 = kKanjiSymbolsTable_Halfwidth[index]; }
+}
+```
+
+同 `src/renderer/text_renderer_directwrite.cpp` — **半角になった字には
+横倍率を掛けない**:
+
+```cpp
+bool is_requesting_halfwidth = floating::AlmostEquals(aspect_ratio, 0.5f, 0.05f);
+bool needless_horizontal_scaling = is_requesting_halfwidth && unicode::IsHalfwidthCharacter(ucs4);
+if (char_width != char_height && !needless_horizontal_scaling) { horizontal_scale = ...; }
+```
+
+LibISDB `ARIBString.cpp` も `CharSize::Medium` で全角→半角に直している。
+
+同じ形にした。
+
+- `tools/gen_gaiji.py` が libaribcaption の半角の表から
+  **「全角の符号位置 → 半角の符号位置」の表 115 文字**を作る
+  (`TSMemoryAribHalfwidth()`)。判定は
+  `TSMemoryAribIsHalfwidth()` = `unicode_helper.hpp` と同じ範囲。
+- 変換側 (`arib_to_aviutl2.cpp`) は中型の時に 1 文字ずつ引き、
+  半角になった字には `<tw>` を出さない。半角形の無い字は
+  従来通り `<tw0.5>` で潰す。1 つの並びに両方が混ざるので、
+  半角になったかどうかで区切って出し分ける。
+
+**文字集合ごとに半角化の対象が違う。**JIS X 0201 片仮名
+(ESC 0x49) はもともと半角の集合なので**丸ごと**半角に写すが、
+全角の片仮名集合 (ESC 0x31) は末尾の記号 6 文字しか写さない。
+これを 1 つの表に混ぜると、片仮名集合の「ア」まで半角になってしまう。
+JIS X 0201 片仮名の分は別の表 (`TSMemoryAribJisKatakanaHalf()`) に
+分け、復号側で引いている。
+
+実測 (`test_caption --dump`、`build/ts-examples/` の 12 本):
+
+```
+                              <tw> の数
+                              直す前  直した後
+Record_20260827-013024.ts        39  ->  0
+Record_20260827-013212.ts        25  ->  0
+Record_20260827-110354.ts         1  ->  0
+Record_20260827-140438.ts         1  ->  0
+
+直す前 : <$字幕><#ffffff,000000>これが<tw0.5>　１，０００<tw>か所<tw0.5>　<tw>必要です<tw0.5>。
+直した後: <$字幕><#ffffff,000000>これが 1,000か所 必要です｡
+```
+
+**放送で使われる中型は全て半角形を持っていた**ので、実データからは
+`<tw>` が消えた。半角形の無い字 (漢字・ひらがな等) に中型が来た場合の
+`<tw0.5>` は残してある。
 
 #### 改行は座標から起こす
 

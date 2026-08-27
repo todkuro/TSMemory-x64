@@ -417,6 +417,24 @@ void RunUnitTests()
 			  TSMemoryAribKatakana(0x79) == L'ー');
 		check("the hiragana set has the ideographic comma",
 			  TSMemoryAribHiragana(0x7D) == L'、');
+		//	**全角の片仮名は半角の表に入れてはいけない。**
+		//	入れると片仮名集合 (ESC 0x31) から来た「ア」まで
+		//	中型で半角になってしまう。半角に写すのは
+		//	JIS X 0201 片仮名の集合だけ
+		check("the katakana set is not in the halfwidth map",
+			  TSMemoryAribHalfwidth(L'ア') == 0);
+		check("the JIS X 0201 katakana set has its own halfwidth form",
+			  TSMemoryAribJisKatakanaHalf(0x31) == 0xFF71		// ｱ
+			  && TSMemoryAribJisKatakana(0x31) == L'ア');
+		check("the halfwidth map covers the ideographic full stop",
+			  TSMemoryAribHalfwidth(L'。') == 0xFF61);
+		check("a character with no halfwidth form is not mapped",
+			  TSMemoryAribHalfwidth(L'あ') == 0);
+		check("halfwidth detection matches libaribcaption",
+			  TSMemoryAribIsHalfwidth(0xFF61)
+			  && TSMemoryAribIsHalfwidth(L' ')
+			  && !TSMemoryAribIsHalfwidth(L'。')
+			  && !TSMemoryAribIsHalfwidth(0));
 	}
 
 	//	8. 壊れた入力で落ちない事 (切り詰め・不正な区点)
@@ -520,6 +538,63 @@ void RunConvertTests()
 		std::vector<int> Drcs;
 		check("the middle size is a scale, not a percentage",
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><tw0.5>あ<tw>い");
+	}
+
+	//	3m. **中型 (MSZ) は「横に潰す」ではなく「半角形を使う」指定。**
+	//	   `。` を <tw0.5> で潰すと丸が楕円になる (実機で発生。
+	//	   TVCaptionMod2 は半角の `｡` を等倍で描いていた)。
+	//	   libaribcaption も横倍率が縦の半分の時に半角の表へ差し替え、
+	//	   描画側は半角になった字に横倍率を掛けない
+	{
+		std::vector<AribItem> Items;
+		AribItem m; m.Type = AribItemType::Size; m.A = 5; m.B = 10;	// 中型
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"。";
+		Items.push_back(m); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("MSZ uses the halfwidth form instead of squashing",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>｡");
+	}
+
+	//	3n. 半角形の無い字は従来通り横半分に潰す。
+	//	   1 つの並びに両方が混ざったら、そこで区切って出し分ける
+	{
+		std::vector<AribItem> Items;
+		AribItem m; m.Type = AribItemType::Size; m.A = 5; m.B = 10;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ。あ";
+		Items.push_back(m); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("a run is split where the halfwidth form runs out",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕><tw0.5>あ<tw>｡<tw0.5>あ");
+	}
+
+	//	3o. **半角化するのは中型の時だけ。**標準 (NSZ) では全角のまま
+	{
+		std::vector<AribItem> Items;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"。Ａ";
+		Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("the normal size keeps the fullwidth form",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>。Ａ");
+	}
+
+	//	3p. 全角英数と全角の空白も中型では半角になる
+	{
+		std::vector<AribItem> Items;
+		AribItem m; m.Type = AribItemType::Size; m.A = 5; m.B = 10;
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"Ａ　Ｂ";
+		Items.push_back(m); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("MSZ turns fullwidth ASCII and space into halfwidth",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>A B");
 	}
 
 	//	3f. **位置**。ACPS は行の下端を指すので 1 行分引いて上端にする

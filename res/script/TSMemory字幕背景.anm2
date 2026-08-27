@@ -4,6 +4,7 @@
 --track@alpha:不透明度,0,100,50,1
 --color@bgcol:背景色,0x000000
 --check@leftalign:左端で合わせる,1
+--check@topalign:上端で合わせる,0
 --check@dbg:デバッグ表示,0
 --[[
 	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷き、
@@ -87,6 +88,13 @@ if w > 0 and h > 0 and alpha > 0 then
 
 	obj.setoption("drawtarget", "framebuffer")
 	obj.copybuffer("object", "tempbuffer")
+
+	--	**余白のぶん縦にずらし戻す。**
+	--	合成でオブジェクトが上下に pady だけ大きくなる。縦の基準が
+	--	上端なので、そのままだと文字が pady だけ下がり、
+	--	背景を切った時と位置が変わってしまう。
+	--	横は下の obj.w / 2 が文字の幅を使っているので影響を受けない
+	obj.oy = obj.oy - pady
 end
 
 --	**箱を描くかどうかに関わらず位置は合わせる。**
@@ -95,7 +103,14 @@ if leftalign == 1 and w > 0 then
 	obj.ox = obj.ox + w / 2
 end
 
+--	縦の基準。「左寄せ[上]」の [上] が上端基準なら何もしなくてよいが、
+--	中央基準だった場合はここで半分ずらして上端に合わせる。
+--	**実機で見比べて決める為の設定。**既定は「何もしない」
+if topalign == 1 and h > 0 then
+	obj.oy = obj.oy + h / 2
+end
+
 if dbg == 1 then
 	print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h
-		  .. " ox=" .. obj.ox)
+		  .. " ox=" .. obj.ox .. " oy=" .. obj.oy)
 end

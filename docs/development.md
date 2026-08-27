@@ -2729,6 +2729,35 @@ TVTest 側で `CTsSelector` に落とされると後段では取り返せない�
 を足している。`tests/test_selector.cpp` で「頼めば通る/頼まなければ落ちる」
 の両方を確認している。
 
+#### `Subtitle=1` のまま `Enable=0` にする形の費用
+
+「普段は字幕が要らないが、欲しくなった時に TVTest を再起動したくない」
+という使い方の実費を測った。
+
+**AviUtl2 側の処理は増えない。**`PlaceCaptions()` は先頭で
+`if (!g_State.CaptionEnable) return false;` しており、
+`CTSCaptionSource` を作るのはその後。復号も DRCS フォントの組み立ても
+走らない。
+
+**共有メモリの占有は 0.01〜0.02%。**PMT を読んで種別ごとに
+パケット数を数えた (`build/pidshare.py` 相当の使い捨て):
+
+```
+Record_20260827-013024.ts   映像 97.87% / 音声 2.11% / 字幕 0.01%
+Record_20260827-140438.ts   映像 97.98% / 音声 2.01% / 字幕 0.01%
+anime_puniru.ts             映像 97.70% / 音声 2.28% / 字幕 0.02%
+```
+
+`CTsSelector` の選択は **stream_type だけ**で component_tag は見ない
+(`TsSelector.cpp` の `StreamTypeList`) ので、`STREAM_SUBTITLE` は
+文字スーパーも通す。それを足しても 0.03% 程度。
+
+**再起動の要る側が違うのが効く。**`Subtitle` は
+`CTSMemory::Initialize()` でしか読まないので変更に TVTest の再起動が
+要り、`[Caption] Enable` は `TSMemoryBridgeStart()` なので AviUtl2 の
+再起動で済む。**視聴中・録画中に落としたくないのは TVTest の方**なので、
+TVTest 側は通しておいて AviUtl2 側で切る形が扱いやすい。
+
 ### 残っている作業
 
 - 背景の箱は作れていない (上記)。位置と文字の大きさが取れたので、

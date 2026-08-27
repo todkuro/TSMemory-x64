@@ -971,8 +971,10 @@ int main(int argc, char **argv)
 		if (k < Layouts.size()) {
 			//	1920x1080 に置いた時の左上 (画面中央が原点)
 			for (const AribCaptionLine &Line : Layouts[k].Lines) {
-				//	**X は行の中央**なので、そちらを出力の座標に直す
-				const int X = Line.CenterX() * 1920 / Layouts[k].PlaneWidth - 960;
+				//	**X には行の左端を入れる。**
+				//	AviUtl2 のテキストは X が行の中央を指すが、
+				//	描画後の幅ぶんはスクリプト側でずらして左揃えにする
+				const int X = Line.Left * 1920 / Layouts[k].PlaneWidth - 960;
 				const int Y = Line.Top * 1080 / Layouts[k].PlaneHeight - 540;
 				std::printf("  (左%3d 右%3d 中央%3d 上%3d dots -> 1080p X=%d Y=%d)\n",
 							Line.Left, Line.Right, Line.CenterX(), Line.Top, X, Y);

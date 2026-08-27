@@ -3,9 +3,24 @@
 --track@pady:縦余白,0,200,4,1
 --track@alpha:不透明度,0,100,50,1
 --color@bgcol:背景色,0x000000
+--check@leftalign:左端で合わせる,1
 --check@dbg:デバッグ表示,0
 --[[
-	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷く。
+	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷き、
+	**行の左端を揃える**。
+
+	■ 左端で合わせる
+
+	AviUtl2 のテキストオブジェクトは X が「行の中央」を指す
+	(実測で確認)。放送の字幕は左揃えなので、放送側の中央を指定すると
+	**書体の幅の違いだけ左端がずれる**。行ごとに文字数が違うので、
+	行の左端が揃わずガタガタになる。
+
+	描画後の幅 obj.w はここでしか判らないので、
+	オブジェクトを右へ obj.w / 2 ずらして「X = 行の左端」にする。
+	プラグイン側はそのつもりで X に放送の左端を入れて来る。
+
+	■ 背景の箱
 
 	**テキストの後ろに図形オブジェクトを置く方式にしていない理由。**
 	図形オブジェクトだと寸法が作った時点で固定されるので、
@@ -36,6 +51,8 @@
 	不透明度の既定 50 は ARIB の色表の索引 65 = (0,0,0,α128) に合わせた値。
 ]]
 
+--	**先に取っておく事。**obj.load() を呼ぶと画像が図形に差し替わり、
+--	合成の後は余白のぶん大きくなる。位置合わせに使うのは文字の幅
 local w = obj.w
 local h = obj.h
 
@@ -43,12 +60,11 @@ if dbg == 1 then
 	print("TSMemory字幕背景: text=" .. w .. "x" .. h
 		  .. " padx=" .. padx .. " pady=" .. pady
 		  .. " alpha=" .. alpha
-		  .. " bgcol=" .. string.format("%06x", bgcol))
+		  .. " bgcol=" .. string.format("%06x", bgcol)
+		  .. " leftalign=" .. leftalign)
 end
 
 if w > 0 and h > 0 and alpha > 0 then
-	--	**先に w/h を取っておく事。**
-	--	obj.load() を呼ぶとオブジェクトの画像が図形に差し替わる
 	local saved = "cache:tsmemory_caption_bg"
 	obj.copybuffer(saved, "object")
 
@@ -80,8 +96,15 @@ if w > 0 and h > 0 and alpha > 0 then
 
 	obj.setoption("drawtarget", "framebuffer")
 	obj.copybuffer("object", "tempbuffer")
+end
 
-	if dbg == 1 then
-		print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h)
-	end
+--	**箱を描くかどうかに関わらず位置は合わせる。**
+--	不透明度 0 で背景を切っても、行の左端は揃っていて欲しい
+if leftalign == 1 and w > 0 then
+	obj.ox = obj.ox + w / 2
+end
+
+if dbg == 1 then
+	print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h
+		  .. " ox=" .. obj.ox)
 end

@@ -360,10 +360,15 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		if (g_State.CaptionPosition && c.HasPosition()
 				&& edit->info != nullptr
 				&& edit->info->width > 0 && edit->info->height > 0) {
-			//	**X はテキストの「中央」。**実測 (X=-620 / サイズ 72 /
-			//	10 文字) で、左端ではなく中央が指定した座標に来た。
-			//	「左寄せ[上]」は縦だけ上端基準で、横は中央基準
-			const int X = c.CenterX * edit->info->width / c.PlaneWidth
+			//	**X には行の左端を入れる。**
+			//	AviUtl2 のテキストは X が「行の中央」を指すが
+			//	(実測: X=-620 / サイズ 72 / 10 文字で中央が来た)、
+			//	放送の字幕は左揃えなので中央で合わせると
+			//	**書体の幅の違いだけ左端がずれる**。行ごとに文字数が
+			//	違うので左端が揃わない。
+			//	描画後の幅はスクリプトの中でしか判らない為、
+			//	そちらで obj.w / 2 ずらして左揃えにしている
+			const int X = c.Left * edit->info->width / c.PlaneWidth
 						  - edit->info->width / 2 + g_State.CaptionOffsetX;
 			const int Y = c.Top * edit->info->height / c.PlaneHeight
 						  - edit->info->height / 2 + g_State.CaptionOffsetY;
@@ -391,7 +396,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	図形だと寸法が作った時点で固定され、後からフォントや
 		//	文字サイズを変えると箱がずれる。スクリプトは描画後の
 		//	obj.w / obj.h を見るので付いて来る
-		if (g_State.CaptionBackOpacity > 0 && !g_State.CaptionBackScript.empty()) {
+		//	**背景を切っていてもスクリプトは貼る。**
+		//	行の左端を揃えるのに、描画後の幅 (obj.w) が要る。
+		//	その値はスクリプトの中でしか判らない
+		if (!g_State.CaptionBackScript.empty()) {
 			EFFECT_HANDLE e = edit->create_effect(o, g_State.CaptionBackScript.c_str());
 			if (e == nullptr) {
 				fBackOk = false;
@@ -409,6 +417,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				edit->set_effect_item_value(e, L"縦余白", szv);
 				edit->set_effect_item_value(e, L"デバッグ表示",
 										   g_State.CaptionBackDebug ? "1" : "0");
+				edit->set_effect_item_value(e, L"左端で合わせる",
+										   g_State.CaptionPosition ? "1" : "0");
 			}
 		}
 
@@ -439,8 +449,9 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	スクリプトが入っていないと create_effect() が nullptr を返す。
 		//	背景が無いだけで字幕自体は出るので、警告に留める
 		::StringCchPrintfW(sz, ARRAYSIZE(sz),
-						   L"TSMemory: 字幕の背景スクリプトが見つかりません "
-						   L"(%s.anm2 を Script フォルダに入れてください)",
+						   L"TSMemory: 字幕のスクリプトが見つかりません "
+						   L"(%s.anm2 を Script フォルダに入れてください。"
+						   L"背景が付かず、行の左端も揃いません)",
 						   g_State.CaptionBackScript.c_str());
 		LogWarn(sz);
 	}

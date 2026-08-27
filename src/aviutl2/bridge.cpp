@@ -56,6 +56,10 @@ struct BridgeState {
 	int CaptionBackOpacity = 50;          // 背景の不透明度 (0 で背景なし)
 	int CaptionBackPaddingX = 8;          // 背景の余白 (字幕平面のドット基準)
 	int CaptionBackPaddingY = 4;
+	//	文字の縁取りの太さ (0 で縁取りなし)。
+	//	**放送の ORN は当てにしない。**実測では字幕を持つ 8 本中
+	//	2 本にしか来ず、TVCaptionMod2 も既定で全ての字幕に縁を付けている
+	int CaptionBackOutline = 2;
 	bool CaptionBackDebug = false;        // スクリプト側の切り分け出力
 	int CaptionLayersUsed = 1;            // 字幕が使ったレイヤーの本数
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
@@ -392,7 +396,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	図形だと寸法が作った時点で固定され、後からフォントや
 		//	文字サイズを変えると箱がずれる。スクリプトは描画後の
 		//	obj.w / obj.h を見るので付いて来る
-		if (g_State.CaptionBackOpacity > 0 && !g_State.CaptionBackScript.empty()) {
+		//	**縁取りだけ欲しい場合もある。**背景を切っていても
+		//	スクリプトは要るので、どちらかが有効なら付ける
+		if ((g_State.CaptionBackOpacity > 0 || g_State.CaptionBackOutline > 0)
+				&& !g_State.CaptionBackScript.empty()) {
 			EFFECT_HANDLE e = edit->create_effect(o, g_State.CaptionBackScript.c_str());
 			if (e == nullptr) {
 				fBackOk = false;
@@ -408,6 +415,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				edit->set_effect_item_value(e, L"横余白", szv);
 				::wsprintfA(szv, "%d", g_State.CaptionBackPaddingY);
 				edit->set_effect_item_value(e, L"縦余白", szv);
+				::wsprintfA(szv, "%d", g_State.CaptionBackOutline);
+				edit->set_effect_item_value(e, L"縁取り", szv);
 				edit->set_effect_item_value(e, L"デバッグ表示",
 										   g_State.CaptionBackDebug ? "1" : "0");
 			}
@@ -770,6 +779,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingX", 8, ini_file);
 		g_State.CaptionBackPaddingY =
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingY", 4, ini_file);
+		g_State.CaptionBackOutline =
+			::GetPrivateProfileIntW(L"Caption", L"BackOutline", 2, ini_file);
 		g_State.CaptionBackDebug =
 			::GetPrivateProfileIntW(L"Caption", L"BackDebug", 0, ini_file) != 0;
 

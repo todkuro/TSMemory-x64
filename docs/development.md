@@ -1800,6 +1800,44 @@ bash tests/tools/m2v-profile.sh build/ts-examples/sample.ts 60
 
 ---
 
+## store_work_frame() の NULL 参照 (実機で落ちた)
+
+プレビューを動かしていて AviUtl2 ごと落ちた。WER の記録:
+
+```
+障害モジュールの名前   TSMemory-TVTestSrc.aux2
+例外コード             c0000005          (アクセス違反)
+例外オフセット         0x143ce
+```
+
+`ImageBase 0x180000000` を足して逆アセンブルすると
+`store_work_frame+0xae` の `movq %rax,(%r15)` で、**その直後に**
+`testq %r15,%r15` (= `if (s == NULL)`) が続いていた。
+
+```c
+case WORK_FRAME_CUR:
+    s = in->cur;
+    s->prm.index = in->cur_index;   /* s が NULL でも書き込む */
+    break;
+...
+if (s == NULL) {                    /* 判定はこの後 */
+    continue;
+}
+```
+
+参照フレームがまだ無い状態 (取り込んだ直後やシークの直後) で
+NULL への書き込みになる。**オリジナルの m2v から同じ**で、
+64bit 化で入れた物ではない
+(`third_party/TSMemory/TVTestSrc/mpeg_video.c` で確認)。
+`tools/patch64.py` で判定の順序を入れ替えた。
+
+> **落ちた時はまず WER を見る。**
+> `C:\ProgramData\Microsoft\Windows\WER\ReportArchive\AppCrash_aviutl2.exe_*\Report.wer`
+> に障害モジュールと例外オフセットが残る。
+> `llvm-objdump -d` で `ImageBase + オフセット` を引けば関数まで辿れる
+> (デバッグ情報が無くてもシンボルは残っている)。
+> ダンプは `%LOCALAPPDATA%\CrashDumps` にもある。
+
 ## クラッシュの調査 (tests/tools/debug-launch)
 
 WER のレポートは**読み込み中のモジュールしか列挙しません**。

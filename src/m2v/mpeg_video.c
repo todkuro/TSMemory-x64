@@ -832,12 +832,18 @@ static OUT_BUFFER_ELEMENT *store_work_frame(MPEG_VIDEO *in, int type)
 
 		switch (type_table[i]) {
 		case WORK_FRAME_CUR:
+			/* The NULL check below used to come after these stores,
+			   so a missing reference frame wrote through NULL. */
 			s = in->cur;
-			s->prm.index = in->cur_index;
+			if (s != NULL) {
+				s->prm.index = in->cur_index;
+			}
 			break;
 		case WORK_FRAME_BWD:
 			s = in->bwd;
-			s->prm.index = in->bwd_index;
+			if (s != NULL) {
+				s->prm.index = in->bwd_index;
+			}
 			break;
 		}
 

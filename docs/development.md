@@ -1775,6 +1775,35 @@ compilers/python/python.exe tests/tools/analyze-levels.py capture.png
 
 ---
 
+## Media Foundation の映像デコーダ (tests/tools/mft-probe)
+
+H.264 / H.265 に対応する場合、音声 (AAC) と同じく Media Foundation を
+使えば追加の DLL もライセンスの問題も無い。**ただし在るかどうかは
+環境で変わる**ので、推測せずに列挙して確かめる。
+
+```bash
+build/tests/mft-probe.exe
+```
+
+実測 (Windows 11 Pro 26200):
+
+```
+  MPEG-2       : 2 個
+      MPEG2VideoExtension
+      Microsoft MPEG Video Decoder MFT
+  H.264        : 1 個
+      Microsoft H264 Video Decoder MFT
+  HEVC         : ありません
+```
+
+- **H.264 は Windows 標準**で入っている
+- **HEVC は入っていない。**Microsoft ストアの「HEVC ビデオ拡張機能」
+  (有償) か、端末メーカー版 (無償だがプリインストールのみ) が要る
+- MPEG-2 のデコーダも在るが、`src/m2v/` のままで足りている
+
+`MFTEnumEx` は見つからなくても `S_OK` を返す。**戻り値ではなく
+個数で判定する事。**
+
 ## 速度の調査 (tests/tools/m2v-profile)
 
 デコードのどこが遅いかをサンプリングで測ります。

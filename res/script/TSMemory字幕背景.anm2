@@ -3,7 +3,6 @@
 --track@pady:縦余白,0,200,4,1
 --track@alpha:不透明度,0,100,50,1
 --color@bgcol:背景色,0x000000
---check@round:角を丸くする,0
 --check@dbg:デバッグ表示,0
 --[[
 	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷く。
@@ -21,6 +20,16 @@
 	仮想バッファの中で合成してオブジェクトに書き戻し、
 	描画そのものは本体に任せる。
 
+	**図形は 4 引数までしか渡さない。**
+	obj.load("figure",name,color,size,line,round,aspect) と説明されているが、
+	同じ説明の例が `obj.load("figure","円",0xffffff,100,true)` と
+	5 番目に true を渡しており、line 以降の解釈が怪しい。
+	大きさは drawpoly で伸ばす方が確実で、縦横比の指定も要らない。
+
+	**デバッグ表示は print()。**obj.mes() はログではなく
+	「テキストオブジェクトのテキストに文字を挿入する」関数なので、
+	ここで呼んでも何も出ない。
+
 	放送の背景は文字セル (36 ドット角 + 字間 4 / 行間 24) の大きさで、
 	字形より一回り大きい。余白の既定値はそこから決めている。
 
@@ -29,6 +38,13 @@
 
 local w = obj.w
 local h = obj.h
+
+if dbg == 1 then
+	print("TSMemory字幕背景: text=" .. w .. "x" .. h
+		  .. " padx=" .. padx .. " pady=" .. pady
+		  .. " alpha=" .. alpha
+		  .. " bgcol=" .. string.format("%06x", bgcol))
+end
 
 if w > 0 and h > 0 and alpha > 0 then
 	--	**先に w/h を取っておく事。**
@@ -39,25 +55,26 @@ if w > 0 and h > 0 and alpha > 0 then
 	local bw = w + padx * 2
 	local bh = h + pady * 2
 
-	--	四角形は正方形で作られるので、長い方を size にして
-	--	aspect で潰す (プラス = 横を縮める / マイナス = 縦を縮める)
-	local size, aspect
-	if bw >= bh then
-		size = bw
-		aspect = -(1.0 - bh / bw)
-	else
-		size = bh
-		aspect = 1.0 - bw / bh
-	end
-
 	--	仮想バッファの中で「背景 + テキスト」を組み立てる。
 	--	仮想バッファへの描画はオブジェクトの座標を反映せず、
 	--	引数の座標そのままで描かれる (中心が 0,0)
 	obj.setoption("drawtarget", "tempbuffer", bw, bh)
 
-	local ok = obj.load("figure", "四角形", bgcol, size, 0, round == 1, aspect)
-	obj.draw(0, 0, 0, 1.0, alpha / 100)
+	--	単色の板を読み込んで、drawpoly で箱の大きさに伸ばす
+	local ok = obj.load("figure", "四角形", bgcol, 100)
+	if dbg == 1 then
+		print("TSMemory字幕背景: figure=" .. tostring(ok)
+			  .. " -> " .. obj.w .. "x" .. obj.h
+			  .. " box=" .. bw .. "x" .. bh)
+	end
 
+	local x0, y0 = -bw / 2, -bh / 2
+	local x1, y1 =  bw / 2,  bh / 2
+	obj.drawpoly(x0, y0, 0,  x1, y0, 0,  x1, y1, 0,  x0, y1, 0,
+				 0, 0,  obj.w, 0,  obj.w, obj.h,  0, obj.h,
+				 alpha / 100)
+
+	--	テキストを戻して上に重ねる
 	obj.copybuffer("object", saved)
 	obj.draw(0, 0, 0, 1.0, 1.0)
 
@@ -65,11 +82,6 @@ if w > 0 and h > 0 and alpha > 0 then
 	obj.copybuffer("object", "tempbuffer")
 
 	if dbg == 1 then
-		obj.mes("TSMemory字幕背景: text=" .. w .. "x" .. h
-				.. " box=" .. bw .. "x" .. bh
-				.. " size=" .. string.format("%.1f", size)
-				.. " aspect=" .. string.format("%.3f", aspect)
-				.. " figure=" .. tostring(ok)
-				.. " -> obj=" .. obj.w .. "x" .. obj.h)
+		print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h)
 	end
 end

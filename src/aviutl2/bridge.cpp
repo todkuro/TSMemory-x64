@@ -57,6 +57,7 @@ struct BridgeState {
 	int CaptionBackPaddingX = 8;          // 背景の余白 (字幕平面のドット基準)
 	int CaptionBackPaddingY = 4;
 	bool CaptionBackDebug = false;        // スクリプト側の切り分け出力
+	int CaptionLayersUsed = 1;            // 字幕が使ったレイヤーの本数
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
 	bool CaptionDebug = false;            // 1 件目のオブジェクトの中身をログに出す
 	int CaptionOffsetX = 0;               // 位置の微調整 (ピクセル)
@@ -105,6 +106,9 @@ void ActivateWindow(HWND hwnd)
 //	**効果名は「標準描画」。**オブジェクト設定の見出しが
 //	「テキスト [標準描画]」になっているのがそれ。
 const WCHAR DRAW_EFFECT[] = L"標準描画";
+
+//	1 つの字幕が使うレイヤーの上限。行ごとに 1 本使う
+const int MAX_CAPTION_LAYERS = 8;
 
 void SetItemInt(EDIT_SECTION *edit, OBJECT_HANDLE o, LPCWSTR pszItem, int Value)
 {
@@ -190,18 +194,6 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		return false;
 	}
 
-	//	**ロックされたレイヤーにはオブジェクトを置けない。**
-	//	前回 LockLayer で掛けたものなら外す。手で掛けたものは
-	//	勝手に外さず、置けない事を伝えて諦める (映像側と同じ扱い)
-	if (edit->get_layer_lock(Layer)) {
-		if (!g_State.LockLayer) {
-			LogWarn(L"TSMemory: 字幕のレイヤーがロックされています "
-					L"(字幕は置きません。ロックを外してください)");
-			return false;
-		}
-		edit->set_layer_lock(Layer, false);
-	}
-
 	//	共有メモリ名は .tvtv のファイル名部分だけ (m2v と同じ規約)
 	char szName[MAX_PATH];
 	if (::WideCharToMultiByte(CP_ACP, 0, ::PathFindFileNameW(pszFile), -1,
@@ -236,15 +228,68 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	const double Rate = (edit->info != nullptr && edit->info->scale > 0)
 						? static_cast<double>(edit->info->rate) / edit->info->scale : 0.0;
 
+	//	**同じレイヤーには時間の重なるオブジェクトを置けない。**
+	//	1 つの字幕の行は同じ時間に出るので、行ごとにレイヤーを分ける。
+	//	分けないと 2 行目以降で create_object() が nullptr を返し、
+	//	AviUtl2 のログに "create object failed (object overlap)" が出る。
+	//
+	//	何行必要かを先に数える。同じ秒数が続く分が 1 つの字幕の行
+	int MaxLines = 1;
+	{
+		int Run = 0;
+		double Last = -1.0;
+		for (int i = 0; i < Source.GetCount(); i++) {
+			const double Sec = Source.Get(i).Seconds;
+			Run = (i > 0 && Sec == Last) ? Run + 1 : 1;
+			Last = Sec;
+			if (Run > MaxLines)
+				MaxLines = Run;
+		}
+	}
+	if (MaxLines > MAX_CAPTION_LAYERS)
+		MaxLines = MAX_CAPTION_LAYERS;
+	g_State.CaptionLayersUsed = MaxLines;
+
+	//	**映像のレイヤーに掛かってはいけない。**
+	//	行が増えると下へ伸びるので、範囲で見る
+	if (g_State.Layer >= Layer && g_State.Layer < Layer + MaxLines) {
+		WCHAR szl[192];
+		::StringCchPrintfW(szl, ARRAYSIZE(szl),
+						   L"TSMemory: 字幕が使うレイヤー %d-%d に映像の "
+						   L"レイヤー %d が入っています (字幕は置きません)",
+						   Layer + 1, Layer + MaxLines, g_State.Layer + 1);
+		LogWarn(szl);
+		return false;
+	}
+
+	//	**ロックされたレイヤーにはオブジェクトを置けない。**
+	//	前回 LockLayer で掛けたものなら外す。手で掛けたものは
+	//	勝手に外さず、置けない事を伝えて諦める (映像側と同じ扱い)
+	for (int n = 0; n < MaxLines; n++) {
+		if (!edit->get_layer_lock(Layer + n))
+			continue;
+		if (!g_State.LockLayer) {
+			LogWarn(L"TSMemory: 字幕のレイヤーがロックされています "
+					L"(字幕は置きません。ロックを外してください)");
+			return false;
+		}
+		edit->set_layer_lock(Layer + n, false);
+	}
+
 	//	配置先レイヤーを空けてから置く
-	for (int i = 0; i < 1024; i++) {
-		OBJECT_HANDLE o = edit->find_object(Layer, 0);
-		if (o == nullptr)
-			break;
-		edit->delete_object(o);
+	for (int n = 0; n < MaxLines; n++) {
+		for (int i = 0; i < 1024; i++) {
+			OBJECT_HANDLE o = edit->find_object(Layer + n, 0);
+			if (o == nullptr)
+				break;
+			edit->delete_object(o);
+		}
 	}
 
 	int Placed = 0;
+	int Dropped = 0;
+	int LineIndex = 0;
+	double LastSeconds = -1.0;
 	bool fPosOk = true;
 	bool fBackOk = true;
 	for (int i = 0; i < Source.GetCount(); i++) {
@@ -276,10 +321,20 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		if (End < Start)
 			End = Start;
 
-		OBJECT_HANDLE o = edit->create_object(L"テキスト", Layer, Start,
-											  End - Start + 1);
-		if (o == nullptr)
+		//	同じ秒数が続く間は同じ字幕の行。行ごとにレイヤーをずらす
+		LineIndex = (c.Seconds == LastSeconds) ? LineIndex + 1 : 0;
+		LastSeconds = c.Seconds;
+		if (LineIndex >= MaxLines) {
+			Dropped++;
 			continue;
+		}
+
+		OBJECT_HANDLE o = edit->create_object(L"テキスト", Layer + LineIndex,
+											  Start, End - Start + 1);
+		if (o == nullptr) {
+			Dropped++;
+			continue;
+		}
 
 		//	設定値は UTF-8 で渡す
 		const int n = ::WideCharToMultiByte(CP_UTF8, 0, c.Text.c_str(), -1,
@@ -356,11 +411,21 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 
 	WCHAR sz[224];
 	::StringCchPrintfW(sz, ARRAYSIZE(sz),
-					   L"TSMemory: 字幕を %d 件配置しました (レイヤー %d"
-					   L"%s%d 字形)",
-					   Placed, Layer + 1,
-					   L" / 外字 ", Source.GetGlyphCount());
+					   L"TSMemory: 字幕を %d 件配置しました "
+					   L"(レイヤー %d-%d / 外字 %d 字形)",
+					   Placed, Layer + 1, Layer + MaxLines,
+					   Source.GetGlyphCount());
 	Log(sz);
+
+	if (Dropped > 0) {
+		//	**同じレイヤーに時間の重なるオブジェクトは置けない。**
+		//	黙って消えると原因が判らないので数を出す
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 字幕 %d 件を置けませんでした "
+						   L"(レイヤーが足りないか、既にオブジェクトがあります)",
+						   Dropped);
+		LogWarn(sz);
+	}
 
 	if (!fBackOk) {
 		//	スクリプトが入っていないと create_effect() が nullptr を返す。
@@ -509,7 +574,8 @@ void ProcEdit(void *param, EDIT_SECTION *edit)
 		//	字幕のレイヤーも同じ扱いにする。次の取り込みでは
 		//	PlaceCaptions() が自分で外すので、掛けたままで構わない
 		if (fCaptionPlaced) {
-			edit->set_layer_lock(g_State.CaptionLayer, true);
+			for (int n = 0; n < g_State.CaptionLayersUsed; n++)
+				edit->set_layer_lock(g_State.CaptionLayer + n, true);
 			Log(L"TSMemory: 字幕のレイヤーもロックしました");
 		}
 	}

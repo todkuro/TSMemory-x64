@@ -3,25 +3,9 @@
 --track@pady:縦余白,0,200,4,1
 --track@alpha:不透明度,0,100,50,1
 --color@bgcol:背景色,0x000000
---check@leftalign:左端で合わせる,1
---check@topalign:上端で合わせる,0
 --check@dbg:デバッグ表示,0
 --[[
-	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷き、
-	**行の左端を揃える**。
-
-	■ 左端で合わせる
-
-	AviUtl2 のテキストオブジェクトは X が「行の中央」を指す
-	(実測で確認)。放送の字幕は左揃えなので、放送側の中央を指定すると
-	**書体の幅の違いだけ左端がずれる**。行ごとに文字数が違うので、
-	行の左端が揃わずガタガタになる。
-
-	描画後の幅 obj.w はここでしか判らないので、
-	オブジェクトを右へ obj.w / 2 ずらして「X = 行の左端」にする。
-	プラグイン側はそのつもりで X に放送の左端を入れて来る。
-
-	■ 背景の箱
+	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷く。
 
 	**テキストの後ろに図形オブジェクトを置く方式にしていない理由。**
 	図形オブジェクトだと寸法が作った時点で固定されるので、
@@ -61,8 +45,7 @@ if dbg == 1 then
 	print("TSMemory字幕背景: text=" .. w .. "x" .. h
 		  .. " padx=" .. padx .. " pady=" .. pady
 		  .. " alpha=" .. alpha
-		  .. " bgcol=" .. string.format("%06x", bgcol)
-		  .. " leftalign=" .. leftalign)
+		  .. " bgcol=" .. string.format("%06x", bgcol))
 end
 
 if w > 0 and h > 0 and alpha > 0 then
@@ -89,28 +72,16 @@ if w > 0 and h > 0 and alpha > 0 then
 	obj.setoption("drawtarget", "framebuffer")
 	obj.copybuffer("object", "tempbuffer")
 
-	--	**余白のぶん縦にずらし戻す。**
-	--	合成でオブジェクトが上下に pady だけ大きくなる。縦の基準が
-	--	上端なので、そのままだと文字が pady だけ下がり、
-	--	背景を切った時と位置が変わってしまう。
-	--	横は下の obj.w / 2 が文字の幅を使っているので影響を受けない
+	--	**余白のぶんずらし戻す。**
+	--	合成でオブジェクトが四方に余白だけ大きくなる。
+	--	テキストオブジェクトの基準点は左上 (文字揃え「左寄せ[上]」。
+	--	実機で確認済み) なので、そのままだと文字が右下へずれ、
+	--	背景を切った時と位置が変わってしまう
+	obj.ox = obj.ox - padx
 	obj.oy = obj.oy - pady
-end
 
---	**箱を描くかどうかに関わらず位置は合わせる。**
---	不透明度 0 で背景を切っても、行の左端は揃っていて欲しい
-if leftalign == 1 and w > 0 then
-	obj.ox = obj.ox + w / 2
-end
-
---	縦の基準。「左寄せ[上]」の [上] が上端基準なら何もしなくてよいが、
---	中央基準だった場合はここで半分ずらして上端に合わせる。
---	**実機で見比べて決める為の設定。**既定は「何もしない」
-if topalign == 1 and h > 0 then
-	obj.oy = obj.oy + h / 2
-end
-
-if dbg == 1 then
-	print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h
-		  .. " ox=" .. obj.ox .. " oy=" .. obj.oy)
+	if dbg == 1 then
+		print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h
+			  .. " ox=" .. obj.ox .. " oy=" .. obj.oy)
+	end
 end

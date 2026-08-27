@@ -57,8 +57,6 @@ struct BridgeState {
 	int CaptionBackPaddingX = 8;          // 背景の余白 (字幕平面のドット基準)
 	int CaptionBackPaddingY = 4;
 	bool CaptionBackDebug = false;        // スクリプト側の切り分け出力
-	bool CaptionAlignTop = false;         // 縦の基準が中央だった場合の補正
-	bool CaptionAlignLeft = true;         // 横の基準が中央だった場合の補正
 	int CaptionLayersUsed = 1;            // 字幕が使ったレイヤーの本数
 	std::wstring CaptionBackScript = L"TSMemory字幕背景";
 	bool CaptionDebug = false;            // 1 件目のオブジェクトの中身をログに出す
@@ -362,14 +360,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		if (g_State.CaptionPosition && c.HasPosition()
 				&& edit->info != nullptr
 				&& edit->info->width > 0 && edit->info->height > 0) {
-			//	**X には行の左端を入れる。**
-			//	AviUtl2 のテキストは X が「行の中央」を指すが
-			//	(実測: X=-620 / サイズ 72 / 10 文字で中央が来た)、
-			//	放送の字幕は左揃えなので中央で合わせると
-			//	**書体の幅の違いだけ左端がずれる**。行ごとに文字数が
-			//	違うので左端が揃わない。
-			//	描画後の幅はスクリプトの中でしか判らない為、
-			//	そちらで obj.w / 2 ずらして左揃えにしている
+			//	**基準点は行の左上。**テキストオブジェクトの
+			//	文字揃え「左寄せ[上]」がそのままの意味だった
+			//	(実機で TVCaptionMod2 と並べて確認済み)。
+			//	放送の字幕も左揃えなので、左端をそのまま入れればよい
 			const int X = c.Left * edit->info->width / c.PlaneWidth
 						  - edit->info->width / 2 + g_State.CaptionOffsetX;
 			const int Y = c.Top * edit->info->height / c.PlaneHeight
@@ -398,10 +392,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	図形だと寸法が作った時点で固定され、後からフォントや
 		//	文字サイズを変えると箱がずれる。スクリプトは描画後の
 		//	obj.w / obj.h を見るので付いて来る
-		//	**背景を切っていてもスクリプトは貼る。**
-		//	行の左端を揃えるのに、描画後の幅 (obj.w) が要る。
-		//	その値はスクリプトの中でしか判らない
-		if (!g_State.CaptionBackScript.empty()) {
+		if (g_State.CaptionBackOpacity > 0 && !g_State.CaptionBackScript.empty()) {
 			EFFECT_HANDLE e = edit->create_effect(o, g_State.CaptionBackScript.c_str());
 			if (e == nullptr) {
 				fBackOk = false;
@@ -419,11 +410,6 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				edit->set_effect_item_value(e, L"縦余白", szv);
 				edit->set_effect_item_value(e, L"デバッグ表示",
 										   g_State.CaptionBackDebug ? "1" : "0");
-				edit->set_effect_item_value(e, L"左端で合わせる",
-										   (g_State.CaptionPosition
-											&& g_State.CaptionAlignLeft) ? "1" : "0");
-				edit->set_effect_item_value(e, L"上端で合わせる",
-										   g_State.CaptionAlignTop ? "1" : "0");
 			}
 		}
 
@@ -454,9 +440,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	スクリプトが入っていないと create_effect() が nullptr を返す。
 		//	背景が無いだけで字幕自体は出るので、警告に留める
 		::StringCchPrintfW(sz, ARRAYSIZE(sz),
-						   L"TSMemory: 字幕のスクリプトが見つかりません "
-						   L"(%s.anm2 を Script フォルダに入れてください。"
-						   L"背景が付かず、行の左端も揃いません)",
+						   L"TSMemory: 字幕の背景スクリプトが見つかりません "
+						   L"(%s.anm2 を Script フォルダに入れてください)",
 						   g_State.CaptionBackScript.c_str());
 		LogWarn(sz);
 	}
@@ -787,10 +772,6 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingY", 4, ini_file);
 		g_State.CaptionBackDebug =
 			::GetPrivateProfileIntW(L"Caption", L"BackDebug", 0, ini_file) != 0;
-		g_State.CaptionAlignTop =
-			::GetPrivateProfileIntW(L"Caption", L"AlignTop", 0, ini_file) != 0;
-		g_State.CaptionAlignLeft =
-			::GetPrivateProfileIntW(L"Caption", L"AlignLeft", 1, ini_file) != 0;
 
 		WCHAR sz[128];
 		TSMemoryGetIniString(ini_file, L"Caption", L"BackScript",

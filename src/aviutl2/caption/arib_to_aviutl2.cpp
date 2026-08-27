@@ -12,19 +12,34 @@
 
 namespace {
 
-//	制御文字として解釈される文字を打ち消す。
-//	**本文に '<' が含まれると制御文字と誤解される。**
-//	字幕には「<笑い>」のような表記が実際に出てくる
+//	制御文字と誤解される文字を避ける。
+//
+//	**AviUtl2 の仕様には '<' の打ち消し方が書かれていない。**
+//	`aviutl2.txt` にも入力補助の `default.word` にも記述が無い。
+//	その為 `<<` のような当て推量は使わず、**全角の '＜' に置き換える**。
+//	字幕の本文はもともと全角なので、放送では ASCII の '<' はまず来ない
+//	(英数集合も全角で出している)。来た場合も見た目は変わらない。
 std::wstring Escape(const std::wstring &s)
 {
 	std::wstring Out;
 	for (wchar_t c : s) {
 		if (c == L'<')
-			Out += L"<<";		// AviUtl2 は << を '<' と解釈する
+			Out += L"＜";		// ＜
 		else
 			Out += c;
 	}
 	return Out;
+}
+
+//	10 倍で持っている倍率を "0.5" / "2" のような文字列にする
+std::wstring ScaleName(int Tenth)
+{
+	if (Tenth % 10 == 0)
+		return std::to_wstring(Tenth / 10);
+	std::wstring s = std::to_wstring(Tenth / 10);
+	s += L".";
+	s += std::to_wstring(Tenth % 10);
+	return s;
 }
 
 void AppendHex(std::wstring *pOut, DWORD Rgb)
@@ -100,7 +115,9 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 	int Color = -1, EmittedColor = -1;
 	int Back = -1, EmittedBack = -1;
-	int Size = 0, EmittedSize = 0;
+	//	文字の大きさ。10 倍した整数で持つ (5 = 半分 / 20 = 倍)
+	int ScaleH = 10, EmittedH = 10;
+	int ScaleV = 10, EmittedV = 10;
 
 	//	放送の文字の大きさ (AviUtl2 のサイズに直した値)。0 ならプリセット任せ
 	int BaseSize = 0;
@@ -110,7 +127,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	auto NewLine = [&]() {
 		if (PendingY < 0)
 			return;
-		if (Size == 2) {		// 小型 = ルビ。行としては数えない
+		//	小型 (縦横とも半分) = ルビ。行としては数えない
+		if (ScaleH == 5 && ScaleV == 5) {
 			PendingY = -1;
 			return;
 		}
@@ -141,7 +159,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			//	標準の行の先頭に無駄な <s> が付く
 			EmittedColor = -1;
 			EmittedBack = -1;
-			EmittedSize = 0;
+			EmittedH = 10;
+			EmittedV = 10;
 			fSizeEmitted = false;
 		}
 		if (Cur.Left < 0 || PendingX < Cur.Left)
@@ -180,40 +199,46 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			EmittedColor = Color;
 			EmittedBack = Back;
 		}
-		if (Size != EmittedSize || (BaseSize > 0 && !fSizeEmitted)) {
-			//	0 標準 / 1 中型 (横半分) / 2 小型 (縦横半分) / 3 倍角
+		if (ScaleH != EmittedH || ScaleV != EmittedV
+				|| (BaseSize > 0 && !fSizeEmitted)) {
+			//	**縦のスケールは <s> (文字サイズ) で、横との差だけを
+			//	<tw> (横スケール) で出す。**<s> は縦横の両方に効くので、
+			//	先に縦を決めてから横の比を掛ける形にしないと合わない。
+			//
+			//	**<tw> は百分率ではなく倍率。**aviutl2.txt の例が
+			//	<tw0.8>、入力補助の既定も <tw0.8> になっている。
+			//	<tw50> と書くと 50 倍に引き伸ばされ、文字が横一線に
+			//	潰れて画面を横切る (実機で発生)
 			if (BaseSize > 0) {
-				//	**放送の大きさに合わせる。**相対指定ではなく
-				//	絶対値で出すので、プリセットのサイズは効かなくなる
-				int n = BaseSize;
-				if (Size == 2)
-					n = (BaseSize + 1) / 2;
-				else if (Size == 3)
-					n = BaseSize * 2;
+				//	**放送の大きさに合わせる。**絶対値で出すので、
+				//	プリセットのサイズは効かなくなる
 				Cur.Text += L"<s";
-				Cur.Text += std::to_wstring(n);
+				Cur.Text += std::to_wstring(BaseSize * ScaleV / 10);
 				Cur.Text += L">";
-				if (Size == 1)
-					Cur.Text += L"<tw0.5>";
-				else if (EmittedSize == 1)
-					Cur.Text += L"<tw>";
-				fSizeEmitted = true;
-			} else {
-				switch (Size) {
-				//	**<tw> は百分率ではなく倍率。**
-				//	aviutl2.txt の例が <tw0.8> になっている。
-				//	<tw50> と書くと 50 倍に引き伸ばされ、文字が
-				//	横一線に潰れて画面を横切る (実機で発生)
-				case 1:  Cur.Text += L"<tw0.5>"; break;	// 横だけ縮める
-				case 2:  Cur.Text += L"<s*0.5>"; break;
-				case 3:  Cur.Text += L"<s*2>"; break;
-				default:
-					//	既定に戻す。横倍率も戻す
-					Cur.Text += (EmittedSize == 1) ? L"<tw>" : L"<s>";
-					break;
-				}
+			} else if (ScaleV != 10) {
+				//	**必ず一度 <s> で戻してから掛ける。**
+				//	相対指定が「元の大きさから」なのか「今の大きさから」
+				//	なのかが仕様に書かれていない。戻してから掛ければ
+				//	どちらの解釈でも同じ結果になる
+				Cur.Text += L"<s><s*";
+				Cur.Text += ScaleName(ScaleV);
+				Cur.Text += L">";
+			} else if (EmittedV != 10) {
+				Cur.Text += L"<s>";			// 標準に戻す時だけ
 			}
-			EmittedSize = Size;
+
+			//	横は縦との比。縦横が同じなら <s> で足りている
+			if (ScaleH != ScaleV) {
+				Cur.Text += L"<tw";
+				Cur.Text += ScaleName(ScaleH * 10 / ScaleV);
+				Cur.Text += L">";
+			} else if (EmittedH != EmittedV) {
+				Cur.Text += L"<tw>";		// 横だけ伸縮していたのを戻す
+			}
+
+			fSizeEmitted = true;
+			EmittedH = ScaleH;
+			EmittedV = ScaleV;
 		}
 	};
 
@@ -248,7 +273,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			break;
 
 		case AribItemType::Size:
-			Size = it.A;
+			ScaleH = it.A;
+			ScaleV = it.B;
 			break;
 
 		case AribItemType::Geometry:

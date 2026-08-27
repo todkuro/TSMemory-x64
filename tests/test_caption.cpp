@@ -509,9 +509,9 @@ void RunConvertTests()
 	//	   画面を横切る (実測で発生)
 	{
 		std::vector<AribItem> Items;
-		AribItem m; m.Type = AribItemType::Size; m.A = 1;	// 中型
+		AribItem m; m.Type = AribItemType::Size; m.A = 5; m.B = 10;	// 中型
 		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
-		AribItem n; n.Type = AribItemType::Size; n.A = 0;	// 標準に戻す
+		AribItem n; n.Type = AribItemType::Size; n.A = 10; n.B = 10;	// 標準
 		AribItem t2; t2.Type = AribItemType::Text; t2.Text = L"い";
 		Items.push_back(m); Items.push_back(t);
 		Items.push_back(n); Items.push_back(t2);
@@ -652,10 +652,10 @@ void RunConvertTests()
 		std::vector<AribItem> Items;
 		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
 		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 449; p.C = 60;
-		AribItem sz; sz.Type = AribItemType::Size; sz.A = 2;
+		AribItem sz; sz.Type = AribItemType::Size; sz.A = 5; sz.B = 5;
 		AribItem r; r.Type = AribItemType::Text; r.Text = L"る";
 		AribItem p2; p2.Type = AribItemType::Position; p2.A = 80; p2.B = 509; p2.C = 60;
-		AribItem n; n.Type = AribItemType::Size; n.A = 0;
+		AribItem n; n.Type = AribItemType::Size; n.A = 10; n.B = 10;
 		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
 		Items.push_back(g); Items.push_back(p); Items.push_back(sz); Items.push_back(r);
 		Items.push_back(p2); Items.push_back(n); Items.push_back(t);
@@ -693,18 +693,20 @@ void RunConvertTests()
 	{
 		std::vector<AribItem> Items;
 		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 449; p.C = 60;
-		AribItem sz; sz.Type = AribItemType::Size; sz.A = 2;		// 小型 = ルビ
+		AribItem sz; sz.Type = AribItemType::Size; sz.A = 5; sz.B = 5;	// 小型 = ルビ
 		AribItem r; r.Type = AribItemType::Text; r.Text = L"る";
 		AribItem p2 = p; p2.B = 509;
-		AribItem n; n.Type = AribItemType::Size; n.A = 0;
+		AribItem n; n.Type = AribItemType::Size; n.A = 10; n.B = 10;
 		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
 		Items.push_back(p); Items.push_back(sz); Items.push_back(r);
 		Items.push_back(p2); Items.push_back(n); Items.push_back(t);
 		AribToAviUtl2Options o2 = opt;
 		o2.UseBroadcastColor = false;
 		std::vector<int> Drcs;
+		//	小型は縦横とも半分。相対指定の基準が仕様に無いので
+		//	一度 <s> で戻してから掛ける
 		check("a ruby line does not become a line break",
-			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><s*0.5>る<s>あ");
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><s><s*0.5>る<s>あ");
 	}
 
 	//	4. 外字。1 文字だけフォントを切り替え、本文の書体は保つ
@@ -732,8 +734,10 @@ void RunConvertTests()
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>〓");
 	}
 
-	//	6. **本文の '<' を打ち消す。**
-	//	   字幕には「<笑い>」のような表記が実際に出てくる
+	//	6. **本文の '<' は全角に置き換える。**
+	//	   AviUtl2 の仕様に打ち消し方が書かれていないので、
+	//	   `<<` のような当て推量は使わない。字幕の本文はもともと全角で、
+	//	   英数集合も全角で出しているので ASCII の '<' はまず来ない
 	{
 		std::vector<AribItem> Items;
 		AribItem t; t.Type = AribItemType::Text; t.Text = L"<笑い>";
@@ -741,8 +745,8 @@ void RunConvertTests()
 		AribToAviUtl2Options o2 = opt;
 		o2.Preset.clear();
 		std::vector<int> Drcs;
-		check("'<' in the text is escaped",
-			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<<笑い>");
+		check("'<' in the text is replaced with the fullwidth one",
+			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"＜笑い>");
 	}
 
 	//	7. 色の対応

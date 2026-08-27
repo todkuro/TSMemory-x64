@@ -25,7 +25,12 @@ enum class AribItemType {
 	Drcs,			// 外字。A = 符号 (どの字形かは別途 DRCS 定義から引く)
 	Color,			// A = 前景色 (0-15)
 	BackColor,		// A = 背景色 (0-15)
-	Size,			// A = 0:標準 1:中型 2:小型 3:倍角
+	//	A = 横スケール, B = 縦スケール (どちらも 10 倍した整数)。
+	//	**縦横を別に持つ。**SZX には「縦だけ 2 倍」「横だけ 2 倍」があり、
+	//	1 つの値では表せない
+	//	  SSZ 小型 = 5,5 / MSZ 中型 = 5,10 / NSZ 標準 = 10,10
+	//	  SZX 0x41 = 10,20 (縦だけ) / 0x44 = 20,10 (横だけ) / 0x45 = 20,20
+	Size,
 	Position,		// A = X, B = Y (字幕平面のドット。APS も ACPS もここに来る)
 	ClearScreen,	// 画面消去 (CS)
 	LineBreak,		// 改行 (APD / APR)

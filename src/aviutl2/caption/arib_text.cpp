@@ -106,27 +106,18 @@ struct State {
 	//	ペンの位置。ACPS / APS で動き、文字を書くと 1 文字分進む
 	int PenX = -1;
 
-	//	今の文字の大きさ。0 標準 / 1 中型 / 2 小型 / 3 倍角。
+	//	今の文字の大きさ。10 倍した整数で持つ (5 = 半分 / 20 = 倍)。
+	//	**縦横を別に持つ。**SZX には「縦だけ 2 倍」「横だけ 2 倍」があり、
+	//	1 つの値では表せない。
 	//	**APS の行送りはこれで変わる。**小型の行に標準の送りを使うと、
 	//	画面の外を指す座標になる (実測: 区切りの行が y=990 になり、
 	//	540 の字幕平面をはみ出した)
-	int Size = 0;
+	int ScaleH = 10;
+	int ScaleV = 10;
 
 	//	1 文字分の送り幅・送り高さ
-	int PitchX() const
-	{
-		const int p = CharW + SpaceH;
-		if (Size == 3) return p * 2;
-		if (Size == 1 || Size == 2) return p / 2;	// 中型は横だけ半分
-		return p;
-	}
-	int PitchY() const
-	{
-		const int p = CharH + SpaceV;
-		if (Size == 3) return p * 2;
-		if (Size == 2) return p / 2;				// 小型は縦も半分
-		return p;
-	}
+	int PitchX() const { return (CharW + SpaceH) * ScaleH / 10; }
+	int PitchY() const { return (CharH + SpaceV) * ScaleV / 10; }
 };
 
 
@@ -335,8 +326,11 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				i += 2;
 				break;
 			case 0x20:
+				//	**空白も 1 文字分の枠を占める。**半角の空白にすると
+				//	送り幅と合わず、その行だけ詰まって見える。
+				//	中型の時は <tw0.5> が掛かるので半角相当になる
 				if (st.PenX >= 0) st.PenX += st.PitchX();
-				PushText(pOut, L" ", st.PenX);
+				PushText(pOut, L"　", st.PenX);
 				break;
 			case 0x1B: {	// ESC
 				if (i >= Size) break;
@@ -390,13 +384,25 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				continue;
 			}
 			switch (b) {
-			case 0x88:	st.Size = 2; PushSimple(pOut, AribItemType::Size, 2); break;	// SSZ 小型
-			case 0x89:	st.Size = 1; PushSimple(pOut, AribItemType::Size, 1); break;	// MSZ 中型
-			case 0x8A:	st.Size = 0; PushSimple(pOut, AribItemType::Size, 0); break;	// NSZ 標準
+			//	SSZ 小型 = 縦横半分 / MSZ 中型 = 横だけ半分 / NSZ 標準
+			case 0x88:	st.ScaleH = 5;  st.ScaleV = 5;
+						PushSimple(pOut, AribItemType::Size, 5, 5); break;
+			case 0x89:	st.ScaleH = 5;  st.ScaleV = 10;
+						PushSimple(pOut, AribItemType::Size, 5, 10); break;
+			case 0x8A:	st.ScaleH = 10; st.ScaleV = 10;
+						PushSimple(pOut, AribItemType::Size, 10, 10); break;
 			case 0x8B:	// SZX (1)
+				//	**0x41 は「縦だけ 2 倍」。**縦横 2 倍は 0x45。
+				//	0x41 を縦横 2 倍にすると横に伸び過ぎる。
+				//	規定外の値では大きさを変えない
 				if (i < Size) {
-					st.Size = (pData[i] == 0x41) ? 3 : 0;
-					PushSimple(pOut, AribItemType::Size, st.Size);
+					switch (pData[i]) {
+					case 0x41: st.ScaleV = 20; break;			// 縦だけ 2 倍
+					case 0x44: st.ScaleH = 20; break;			// 横だけ 2 倍
+					case 0x45: st.ScaleH = 20; st.ScaleV = 20; break;
+					default:   break;
+					}
+					PushSimple(pOut, AribItemType::Size, st.ScaleH, st.ScaleV);
 				}
 				i++;
 				break;

@@ -114,6 +114,57 @@ const WCHAR DRAW_EFFECT[] = L"標準描画";
 //	1 つの字幕が使うレイヤーの上限。行ごとに 1 本使う
 const int MAX_CAPTION_LAYERS = 8;
 
+//	字幕のレイヤーを空ける。置けるかどうかを判断する**前**に呼ぶ事。
+//
+//	**前の字幕が残るのを防ぐ為。**映像側は新しい映像が取れるかに
+//	関わらず先にレイヤーを空けているが、字幕側は字幕が取れた後でしか
+//	空けていなかった。その為、
+//	  ・チャンネルを変えた直後で字幕がまだ溜まっていない
+//	  ・前回より行数が少ない
+//	といった時に**前のチャンネルの字幕が残っていた** (実機で発生)。
+//
+//	**消すのは「Layer から下へ続く塊」だけ。**空のレイヤーに当たったら
+//	そこで止める。字幕は Layer から隙間なく置くので、空きが出た所から
+//	先は字幕の持ち物ではない。上限は MAX_CAPTION_LAYERS。
+//
+//	置けない事が判った時は false を返す (利用者が手で掛けたロック)。
+bool ClearCaptionLayers(EDIT_SECTION *edit, int Layer)
+{
+	for (int n = 0; n < MAX_CAPTION_LAYERS; n++) {
+		const int L = Layer + n;
+
+		//	**映像のレイヤーには触らない。**
+		//	ここで消すと取り込んだ映像ごと消える
+		if (L == g_State.Layer)
+			break;
+
+		//	空なら塊の終わり。ロックの状態も変えずに抜ける
+		if (edit->find_object(L, 0) == nullptr)
+			break;
+
+		if (edit->get_layer_lock(L)) {
+			//	前回 LockLayer で掛けた物なら外す。手で掛けた物は
+			//	勝手に外さず、置けない事を伝えて諦める (映像側と同じ扱い)
+			if (!g_State.LockLayer) {
+				LogWarn(L"TSMemory: 字幕のレイヤーがロックされています "
+						L"(字幕は置きません。ロックを外してください)");
+				return false;
+			}
+			edit->set_layer_lock(L, false);
+		}
+
+		//	find_object() は指定フレーム以降で最初に見つかった物を返すので、
+		//	見つからなくなるまで削除する (無限ループ防止に上限を設ける)
+		for (int i = 0; i < 1024; i++) {
+			OBJECT_HANDLE o = edit->find_object(L, 0);
+			if (o == nullptr)
+				break;
+			edit->delete_object(o);
+		}
+	}
+	return true;
+}
+
 void SetItemInt(EDIT_SECTION *edit, OBJECT_HANDLE o, LPCWSTR pszItem, int Value)
 {
 	char sz[32];
@@ -198,6 +249,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		return false;
 	}
 
+	//	**字幕が取れるかを調べる前にレイヤーを空ける。**映像側と同じ順序。
+	//	後回しにすると、字幕が取れなかった時に前の字幕が残る
+	g_State.CaptionLayersUsed = 0;
+	if (!ClearCaptionLayers(edit, Layer))
+		return false;
+
 	//	共有メモリ名は .tvtv のファイル名部分だけ (m2v と同じ規約)
 	char szName[MAX_PATH];
 	if (::WideCharToMultiByte(CP_ACP, 0, ::PathFindFileNameW(pszFile), -1,
@@ -270,8 +327,9 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	}
 
 	//	**ロックされたレイヤーにはオブジェクトを置けない。**
-	//	前回 LockLayer で掛けたものなら外す。手で掛けたものは
-	//	勝手に外さず、置けない事を伝えて諦める (映像側と同じ扱い)
+	//	空けるのは ClearCaptionLayers() で済ませてあるが、そちらは
+	//	「前回置いた塊」しか見ない。今回の方が行数が多いと、その先の
+	//	空のレイヤーが残っているので、ここで改めて見る
 	for (int n = 0; n < MaxLines; n++) {
 		if (!edit->get_layer_lock(Layer + n))
 			continue;
@@ -281,16 +339,6 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 			return false;
 		}
 		edit->set_layer_lock(Layer + n, false);
-	}
-
-	//	配置先レイヤーを空けてから置く
-	for (int n = 0; n < MaxLines; n++) {
-		for (int i = 0; i < 1024; i++) {
-			OBJECT_HANDLE o = edit->find_object(Layer + n, 0);
-			if (o == nullptr)
-				break;
-			edit->delete_object(o);
-		}
 	}
 
 	int Placed = 0;

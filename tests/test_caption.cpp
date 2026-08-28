@@ -123,7 +123,24 @@ struct CaptionUnit {
 	int DataGroupId;
 	std::vector<BYTE> Body;		// data_unit の中身
 	BYTE Parameter;				// 0x20 = 本文 / 0x30,0x31 = DRCS
+	//	PES の PTS (90kHz)。無ければ -1。
+	//	**本文の無いユニットにも PTS が付いている。**
+	//	そこが「消す時刻」なので、表示の長さを測るのに要る
+	INT64 Pts = -1;
 };
+
+//	PES ヘッダから PTS を取り出す (90kHz)。無ければ -1
+INT64 PesPts(const std::vector<BYTE> &Pes)
+{
+	if (Pes.size() < 14 || (Pes[7] & 0x80) == 0)
+		return -1;
+	const BYTE *p = &Pes[9];
+	return (static_cast<INT64>(p[0] & 0x0E) << 29)
+		 | (static_cast<INT64>(p[1]) << 22)
+		 | (static_cast<INT64>(p[2] & 0xFE) << 14)
+		 | (static_cast<INT64>(p[3]) << 7)
+		 | (static_cast<INT64>(p[4]) >> 1);
+}
 
 void ParseCaptionPes(const std::vector<BYTE> &Pes, std::vector<CaptionUnit> *pOut)
 {
@@ -186,6 +203,7 @@ void ParseCaptionPes(const std::vector<BYTE> &Pes, std::vector<CaptionUnit> *pOu
 		CaptionUnit u;
 		u.DataGroupId = Id;
 		u.Parameter = Param;
+		u.Pts = PesPts(Pes);
 		u.Body.assign(body + q + 5, body + q + 5 + Len);
 		pOut->push_back(u);
 		q += 5 + Len;
@@ -1094,7 +1112,65 @@ int main(int argc, char **argv)
 	std::printf("  縁取り (ORN) : %d 件", Ornaments);
 	for (const auto &e : OrnColors)
 		std::printf(" / 色 %d が %d 件", e.first, e.second);
-	std::printf("\n\n");
+	std::printf("\n");
+
+	//	**「消す」ユニットを使えば表示の長さが判る。**
+	//	今は次の字幕が来るまで出しっぱなしにしているので、
+	//	その差がどれだけあるかを測る
+	{
+		double SumShown = 0.0, SumNext = 0.0;
+		int Pairs = 0, Late = 0;
+		double Worst = 0.0;
+		for (size_t i = 0; i < Units.size(); i++) {
+			if (Units[i].Parameter != 0x20 || Units[i].Pts < 0)
+				continue;
+			std::vector<AribItem> Items;
+			AribDecodeText(Units[i].Body.data(), Units[i].Body.size(), &Items);
+			AribToAviUtl2Options o;
+			std::vector<int> Codes;
+			AribCaptionLayout L;
+			AribItemsToAviUtl2(Items, o, &Codes, &L);
+			if (L.Lines.empty())
+				continue;		// 消すだけのユニット
+
+			//	次のユニット = 消す時刻 / 次に本文が来るユニット
+			double Erase = -1.0, Next = -1.0;
+			for (size_t k = i + 1; k < Units.size(); k++) {
+				if (Units[k].Parameter != 0x20 || Units[k].Pts < 0)
+					continue;
+				const double dt = (Units[k].Pts - Units[i].Pts) / 90000.0;
+				if (dt <= 0.0)
+					continue;
+				if (Erase < 0.0)
+					Erase = dt;
+				std::vector<AribItem> It2;
+				AribDecodeText(Units[k].Body.data(), Units[k].Body.size(), &It2);
+				AribCaptionLayout L2;
+				std::vector<int> C2;
+				AribItemsToAviUtl2(It2, o, &C2, &L2);
+				if (!L2.Lines.empty()) {
+					Next = dt;
+					break;
+				}
+			}
+			if (Erase < 0.0 || Next < 0.0)
+				continue;
+			SumShown += Erase;
+			SumNext += Next;
+			if (Next - Erase > Worst)
+				Worst = Next - Erase;
+			if (Next - Erase > 0.5)
+				Late++;
+			Pairs++;
+		}
+		if (Pairs > 0) {
+			std::printf("  表示の長さ : 放送 平均 %.1f 秒 / "
+						"次の字幕まで 平均 %.1f 秒 "
+						"(%d 組中 %d 組が 0.5 秒以上長い、最大 %.1f 秒)\n",
+						SumShown / Pairs, SumNext / Pairs, Pairs, Late, Worst);
+		}
+	}
+	std::printf("\n");
 
 	//	本文はあるが画面消去だけ、という区間もある (短い切り出しで起こる)
 	if (WithText == 0) {

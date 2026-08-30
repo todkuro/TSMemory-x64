@@ -87,6 +87,37 @@ struct Pids {
 	WORD Video = 0;
 };
 
+//---------------------------------------------------------------------------
+//	外字の字形を取り込みをまたいで覚えておく
+//
+//	**字形は数十秒おきにしか流れて来ない** (実測の中央値 14.2 秒、
+//	最大 210 秒)。既定の MemorySize は 8〜14 秒相当なので、
+//	半々くらいで窓に入らず `《` `》` 等が代替文字になる。
+//	同じチャンネルで 2 回目以降の取り込みなら前の物を使い回せる。
+//
+//	**符号 (0x21 から順) の意味は番組ごとに変わる。**
+//	番組が変われば `0x21` が別の字形に割り当て直されるので、
+//	  ・字幕 PID ごとに分ける (チャンネルが変われば別)
+//	  ・古い物は使わない (下記の時間で切る)
+//	の 2 つで古い字形を掴まないようにしている。
+//	それでも同じチャンネルで番組をまたぐと取り違え得るので、
+//	使った時はログに出す。
+const DWORD GLYPH_CACHE_LIFE_MS = 30 * 60 * 1000;	// 30 分
+const size_t GLYPH_CACHE_MAX = 1024;
+
+struct CachedGlyph {
+	TSMemoryDrcsGlyph Glyph;
+	DWORD Tick;
+};
+
+//	キーは (字幕 PID << 16) | 符号
+std::map<DWORD, CachedGlyph> g_GlyphCache;
+
+DWORD GlyphKey(WORD Pid, int Code)
+{
+	return (static_cast<DWORD>(Pid) << 16) | (static_cast<DWORD>(Code) & 0xFFFF);
+}
+
 //	PAT/PMT から字幕と映像の PID を拾う
 Pids FindPids(const std::vector<BYTE> &Ts)
 {
@@ -225,6 +256,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	m_Font.clear();
 	m_GlyphCount = 0;
 	m_MissingGlyphs = 0;
+	m_CachedGlyphs = 0;
 	m_szError[0] = L'\0';
 
 	std::vector<BYTE> Ts;
@@ -407,6 +439,22 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			Handle(e.second.Pes);
 	}
 
+	//	--- 受け取った字形を覚えておく ---------------------------------------
+	const WORD CaptionPid = pids.Caption.empty() ? 0 : pids.Caption[0];
+	const DWORD Now = ::GetTickCount();
+	if (Options.UseGlyphCache && CaptionPid != 0) {
+		//	**溜まり過ぎたら丸ごと捨てる。**外字の符号は 1 つの文字集合で
+		//	94 個までなので、普通はここに掛からない
+		if (g_GlyphCache.size() > GLYPH_CACHE_MAX)
+			g_GlyphCache.clear();
+		for (const auto &e : Glyphs) {
+			CachedGlyph c;
+			c.Glyph = e.second;
+			c.Tick = Now;
+			g_GlyphCache[GlyphKey(CaptionPid, e.first)] = c;
+		}
+	}
+
 	//	--- 外字のフォントを組み立てる ---------------------------------------
 	//	割り当てた順 (DrcsCodes) と同じ並びで字形を並べる
 	if (!DrcsCodes.empty() && !Options.DrcsFont.empty()) {
@@ -415,8 +463,23 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			auto it = Glyphs.find(DrcsCodes[i]);
 			if (it == Glyphs.end()) {
 				//	**字形が届かなかった外字。**
-				//	リングバッファの窓より前に定義されている場合に起こる
-				m_MissingGlyphs++;
+				//	リングバッファの窓より前に定義されている場合に起こる。
+				//	前の取り込みで受け取っていれば、そちらを使う
+				bool fCached = false;
+				if (Options.UseGlyphCache && CaptionPid != 0) {
+					auto c = g_GlyphCache.find(
+						GlyphKey(CaptionPid, DrcsCodes[i]));
+					if (c != g_GlyphCache.end()
+							&& Now - c->second.Tick <= GLYPH_CACHE_LIFE_MS) {
+						TSMemoryDrcsGlyph g = c->second.Glyph;
+						g.Code = static_cast<wchar_t>(Options.DrcsFirstCode + i);
+						List.push_back(g);
+						m_CachedGlyphs++;
+						fCached = true;
+					}
+				}
+				if (!fCached)
+					m_MissingGlyphs++;
 				continue;
 			}
 			TSMemoryDrcsGlyph g = it->second;

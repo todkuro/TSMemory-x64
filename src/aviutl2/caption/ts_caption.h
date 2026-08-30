@@ -76,6 +76,14 @@ public:
 	//	字形が届かなかった外字の数 (リングバッファの窓の外で定義された物)
 	int GetMissingGlyphCount() const { return m_MissingGlyphs; }
 
+	//	前回までの取り込みで覚えていた字形を使った数。
+	//
+	//	**外字の字形は数十秒おきにしか流れて来ない** (実測の中央値
+	//	14.2 秒、最大 210 秒) ので、既定の MemorySize (8〜14 秒相当) では
+	//	半々くらいで窓に入らない。同じチャンネルなら前に受け取った物を
+	//	使い回せる
+	int GetCachedGlyphCount() const { return m_CachedGlyphs; }
+
 	LPCWSTR GetLastError() const { return m_szError; }
 
 private:
@@ -83,5 +91,6 @@ private:
 	std::vector<BYTE> m_Font;
 	size_t m_GlyphCount = 0;
 	int m_MissingGlyphs = 0;
+	int m_CachedGlyphs = 0;
 	WCHAR m_szError[128] = {};
 };

@@ -33,6 +33,15 @@ struct AribToAviUtl2Options {
 	//	外字を表せない時の文字
 	std::wstring DrcsFallback = L"〓";
 
+	//	**前回までの取り込みで受け取った字形を使い回すか。**
+	//	(`CTSCaptionSource` だけが見る。文字列への変換には関係しない)
+	//
+	//	字形は数十秒おきにしか流れて来ないので、既定の `MemorySize` では
+	//	半々くらいで窓に入らず `《` `》` 等が代替文字になる。
+	//	**符号 (0x21 から順) の意味は番組ごとに変わる**ので、
+	//	同じ字幕 PID の間だけ、一定時間だけ覚えておく
+	bool UseGlyphCache = true;
+
 	//	放送の色をそのまま使うか。
 	//	0 にするとプリセット側の色に任せる (<#...> を出さない)
 	bool UseBroadcastColor = true;

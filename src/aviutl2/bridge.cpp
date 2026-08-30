@@ -53,6 +53,8 @@ struct BridgeState {
 	//	ルビを </>漢字<!>ふりがな</> にするか。
 	//	0 にすると従来どおり小型のまま本文に混ぜる
 	bool CaptionRuby = true;
+	//	外字の字形を取り込みをまたいで使い回すか
+	bool CaptionDrcsCache = true;
 	bool CaptionBackColor = true;         // 放送の背景色を影・縁色に流すか
 	bool CaptionBroadcastSize = false;    // 放送の文字の大きさに合わせるか
 	bool CaptionPosition = true;          // 放送の位置に合わせるか
@@ -269,6 +271,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	opt.DrcsFont = g_State.CaptionDrcsFont;
 	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
 	opt.UseRuby = g_State.CaptionRuby;
+	opt.UseGlyphCache = g_State.CaptionDrcsCache;
 	opt.UseBroadcastBackColor = g_State.CaptionBackColor;
 	opt.UseBroadcastSize = g_State.CaptionBroadcastSize;
 	opt.ScreenHeight = (edit->info != nullptr) ? edit->info->height : 0;
@@ -521,6 +524,16 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		//	効果名か項目名が違うと黙って位置が付かないだけになる
 		LogWarn(L"TSMemory: 字幕の位置を設定できませんでした "
 				L"(テキストオブジェクトの「標準描画」に X/Y がありません)");
+	}
+
+	if (Source.GetCachedGlyphCount() > 0) {
+		//	**符号の意味は番組ごとに変わる。**同じチャンネルでも
+		//	番組をまたぐと取り違え得るので、使った事を伝える
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 外字 %d 個は前回までに受け取った"
+						   L"字形を使いました",
+						   Source.GetCachedGlyphCount());
+		Log(sz);
 	}
 
 	if (Source.GetMissingGlyphCount() > 0) {
@@ -841,6 +854,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingX", 8, ini_file);
 		g_State.CaptionBackPaddingY =
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingY", 4, ini_file);
+		g_State.CaptionDrcsCache =
+			::GetPrivateProfileIntW(L"Caption", L"DrcsCache", 1, ini_file) != 0;
 		g_State.CaptionRuby =
 			::GetPrivateProfileIntW(L"Caption", L"Ruby", 1, ini_file) != 0;
 		g_State.CaptionBackOutline =

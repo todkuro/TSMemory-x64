@@ -31,8 +31,22 @@ bool IsTwoByte(CharSet s)
 	return s == CharSet::Kanji || s == CharSet::AddSymbol || s == CharSet::Drcs2;
 }
 
-CharSet FromFinal(BYTE F, bool fTwoByte)
+//	ESC の終端バイトから文字集合を決める。
+//
+//	**外字の指定 (ESC ... 0x20 F) は別の表。**同じ終端バイトでも
+//	意味が違う。混ぜると外字 2 番 (0x42) が漢字集合に、
+//	9 番 (0x49) が JIS X0201 カタカナに、10 番 (0x4A) が英数になる
+//	(実測の 33 番組では 0x41 = 外字 1 番しか来ないので表には出ないが、
+//	 来たら本文が化ける)
+CharSet FromFinal(BYTE F, bool fTwoByte, bool fDrcs)
 {
+	if (fDrcs) {
+		if (F == 0x70) return CharSet::Macro;
+		if (F == 0x40) return CharSet::Drcs2;		// 外字 0 番は 2 バイト
+		if (F >= 0x41 && F <= 0x4F) return CharSet::Drcs1;
+		return CharSet::Other;
+	}
+
 	switch (F) {
 	case 0x42: return CharSet::Kanji;
 	case 0x4A: return CharSet::Alnum;
@@ -43,9 +57,14 @@ CharSet FromFinal(BYTE F, bool fTwoByte)
 	case 0x39: case 0x3A: return CharSet::Kanji;	// JIS 互換漢字
 	case 0x70: return CharSet::Macro;
 	case 0x40: return CharSet::Drcs2;
+	//	**プロポーショナル集合。**字形の表は普通の集合と同じで、
+	//	送り幅だけが字ごとに変わる。対応していないと `Other` に落ちて
+	//	**その集合の文字が丸ごと消える**
+	//	(実測の 33 番組では現れないが、来たら本文が欠ける)
+	case 0x36: return CharSet::Alnum;
+	case 0x37: return CharSet::Hiragana;
+	case 0x38: return CharSet::Katakana;
 	default:
-		if (F >= 0x41 && F <= 0x4F)
-			return CharSet::Drcs1;
 		return fTwoByte ? CharSet::Kanji : CharSet::Other;
 	}
 }
@@ -327,6 +346,20 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 	//	読まないと 1 行に繋がったまま画面をはみ出す
 	//	(実測: 平面 960 幅に対して右端が 1230 になっていた)。
 	//	文字を書く直前に呼ぶ事
+	//	ペンを桁・行の単位で動かす。fHome なら桁を表示領域の左端へ戻す。
+	//	座標が判っていない間は改行として伝えるしかない
+	auto MovePen = [&](int Cols, int Rows, bool fHome) {
+		if (st.PenX < 0 || st.PenY < 0) {
+			if (Rows > 0)
+				PushSimple(pOut, AribItemType::LineBreak);
+			return;
+		}
+		st.PenX = fHome ? st.OrigX : st.PenX + Cols * st.PitchX();
+		st.PenY += Rows * st.PitchY();
+		PushSimple(pOut, AribItemType::Position, st.PenX, st.PenY,
+				   st.PitchY(), st.PitchX());
+	};
+
 	auto Wrap = [&]() {
 		if (st.PenX < 0 || st.PenY < 0)
 			return;
@@ -348,13 +381,25 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			i++;
 			switch (b) {
 			case 0x0C:	PushSimple(pOut, AribItemType::ClearScreen); break;
-			case 0x0D:	PushSimple(pOut, AribItemType::LineBreak); break;	// APR
-			case 0x0A:	PushSimple(pOut, AribItemType::LineBreak); break;	// APD
+			//	**ペンを動かす符号。**実測の 33 番組では一度も来ないが、
+			//	来た時に位置がずれると本文の並びが崩れる。
+			//	座標が判らない時だけ改行として伝える
+			case 0x0D:	MovePen(0, 1, true);  break;	// APR 改行 (左端 + 1 行下)
+			case 0x0A:	MovePen(0, 1, false); break;	// APD 1 行下 (桁はそのまま)
+			case 0x0B:	MovePen(0, -1, false); break;	// APU 1 行上
+			case 0x09:	MovePen(1, 0, false); break;	// APF 1 つ進む
+			case 0x08:	MovePen(-1, 0, false); break;	// APB 1 つ戻る
 			case 0x0F:	st.GL = 0; break;									// LS0
 			case 0x0E:	st.GL = 1; break;									// LS1
 			case 0x19:	st.Single = 2; break;								// SS2
 			case 0x1D:	st.Single = 3; break;								// SS3
-			case 0x16:	i++; break;											// PAPF (1)
+			case 0x16:	// PAPF (1) : n つ進む
+				//	**引数を捨てるだけでは足りない。**送りに反映しないと
+				//	その分だけ以降の位置が左にずれる
+				if (i < Size)
+					MovePen(pData[i] & 0x3F, 0, false);
+				i++;
+				break;
 			case 0x1C:	// APS (2) : 行, 桁
 				//	**ACPS と単位を揃えてドットで持つ。**
 				//	混ざったまま渡すと呼び出し側が区別できない
@@ -394,6 +439,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					if (i >= Size) break;
 					BYTE f = pData[i++];
 					int g = 0;
+					bool fDrcs = false;
 					if (f >= 0x28 && f <= 0x2B) {
 						g = f - 0x28;
 						if (i >= Size) break;
@@ -401,20 +447,23 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 						if (f == 0x20) {					// DRCS
 							if (i >= Size) break;
 							f = pData[i++];
+							fDrcs = true;
 						}
 					}
-					st.G[g] = FromFinal(f, true);
+					st.G[g] = FromFinal(f, true, fDrcs);
 					break;
 				}
 				if (e >= 0x28 && e <= 0x2B) {				// 1 バイト集合
 					const int g = e - 0x28;
 					if (i >= Size) break;
 					BYTE f = pData[i++];
+					bool fDrcs = false;
 					if (f == 0x20) {						// DRCS
 						if (i >= Size) break;
 						f = pData[i++];
+						fDrcs = true;
 					}
-					st.G[g] = FromFinal(f, false);
+					st.G[g] = FromFinal(f, false, fDrcs);
 					break;
 				}
 				break;

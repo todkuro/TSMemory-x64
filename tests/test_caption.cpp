@@ -408,6 +408,55 @@ void RunUnitTests()
 			  Positions == 2 && WrapX == 170 && LastY == 449 + 60);
 	}
 
+	//	5b4. **外字の指定は別の表。**ESC ... 0x20 F の F は外字の番号で、
+	//	   本文の集合とは意味が違う。混ぜると外字 2 番 (0x42) が漢字集合に
+	//	   なり、以降の本文が 2 バイトで読まれて丸ごと化ける
+	{
+		//	ESC 0x28 0x20 0x42 = G0 に外字 2 番 (1 バイト) / そのあと 0x21
+		const BYTE d[] = { 0x1B, 0x28, 0x20, 0x42, 0x21 };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		bool fDrcs = false;
+		for (const AribItem &it : Items)
+			fDrcs = fDrcs || (it.Type == AribItemType::Drcs);
+		check("a DRCS designation is not read as a character set", fDrcs);
+	}
+
+	//	5b5. **プロポーショナル集合。**字形の表は普通の集合と同じ。
+	//	   対応していないとその集合の文字が丸ごと消える
+	{
+		//	ESC 0x28 0x37 = G0 にプロポーショナルひらがな / 0x22 = あ
+		const BYTE d[] = { 0x1B, 0x28, 0x37, 0x22 };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("the proportional hiragana set is decoded",
+			  AribItemsToPlainText(Items) == L"あ");
+	}
+
+	//	5b6. **ペンを動かす符号 (APF / APB / APU / PAPF)。**
+	//	   実測の 33 番組では来ないが、来た時に送りへ反映しないと
+	//	   以降の位置がずれる
+	{
+		//	ACPS 170;449 のあと APF (1 つ進む) / PAPF 2 (2 つ進む) / 「あ」
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x34, 0x20, 0x58,
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x09,					// APF
+			0x16, 0x42,				// PAPF 2 (0x42 & 0x3F = 2)
+			0x24, 0x22,				// あ
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Left = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Text)
+				Left = it.D;
+		}
+		//	170 + (1 + 2) * 40 = 290
+		check("APF and PAPF move the pen", Left == 290);
+	}
+
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
 	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
 	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、

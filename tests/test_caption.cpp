@@ -1269,6 +1269,30 @@ void RunConvertTests()
 		check("the same glyph gets the same code", Drcs.size() == 1);
 	}
 
+	//	4b. **既定のフォント名 (空白入り) でも同じ形になる事。**
+	//	   `[Caption] DrcsFont` の既定は "TSMemory DRCS"。
+	//	   `<@名前,装飾>` の区切りは ',' なので空白は名前の一部になる
+	{
+		std::vector<AribItem> Items;
+		AribItem d; d.Type = AribItemType::Drcs; d.A = 0x4121;
+		Items.push_back(d);
+		AribToAviUtl2Options o2 = opt;
+		o2.DrcsFont = L"TSMemory DRCS";
+		std::vector<int> Drcs;
+		const std::wstring s = AribItemsToAviUtl2(Items, o2, &Drcs);
+
+		//	<@TSMemory DRCS> + U+E000 + <@>
+		std::wstring Want = L"<$字幕><@TSMemory DRCS>";
+		Want += static_cast<wchar_t>(0xE000);
+		Want += L"<@>";
+		check("the default font name with a space is emitted as is", s == Want);
+
+		//	**私用領域の 1 文字が挟まっている事。**
+		//	ここが抜けると外字の位置に何も出ない
+		check("a private-use character sits between the font switches",
+			  s.find(static_cast<wchar_t>(0xE000)) != std::wstring::npos);
+	}
+
 	//	5. 外字用フォントが無ければ代替文字
 	{
 		std::vector<AribItem> Items;

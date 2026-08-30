@@ -3098,6 +3098,37 @@ TVCaptionMod2 に「背景の不透明度」の設定があるのは、
 半透明の箱そのものを再現するには、字幕の後ろに図形オブジェクトを
 置く必要がある (未着手)。
 
+#### 外字のフォントは初期化の中でしか登録できない
+
+**AviUtl2 ごと落ちた。**本体のログ:
+
+```
+[ERROR] [Exception] not register except initialize in
+        Plugin::CommonPluginService::registerFontCollection()
+[ERROR] [Exception] params->callback() structured exception in
+        Plugin::CommonPluginService::callEditSection()
+        [Code: 0xE06D7363 ... Plugin: TSMemory-TVTestSrc.aux2]
+```
+
+`register_font_collection()` は **RegisterPlugin の中でしか
+受け付けない**。取り込みの時に呼ぶと本体が C++ 例外 (0xE06D7363) を
+投げ、コールバックの中で落ちる。
+
+**外字の字形は取り込むまで判らない**ので、この API では
+「放送されてきた字形をその場でフォントにして使う」事が出来ない。
+`TSMemoryRegisterFontCollection()` は初期化中だけ許すようにし
+(`TSMemoryFontCanRegister()`)、取り込みの時は
+`AribToAviUtl2Options::DrcsFont` を空にして**代替文字**を出す。
+
+**なぜ今まで落ちなかったか。**符号の形が違っていて字形が 1 つも
+揃わず、`m_Font` が空のままだった為に登録を呼んでいなかった。
+符号を直した途端に初めてこの経路が動き、落ちるようになった。
+
+やるとすれば、字形を**次回の起動時に**登録する形になる。
+私用領域の割り当てを字形の内容 (ハッシュ) で決めて保存しておき、
+初期化の時に読み込んで登録する。番組ごとに符号の意味が変わるので、
+ARIB の符号ではなく字形そのものを鍵にする必要がある。未着手。
+
 #### 外字の定義と本文で符号の形が違う
 
 **字形を受け取っていても必ず「無し」になっていた。**実機のログ:

@@ -1451,6 +1451,8 @@ int main(int argc, char **argv)
 	int Body = 0, Drcs = 0;
 	//	定義された外字の符号 (**本文と同じ形に直した値**)
 	std::map<int, int> DrcsDefined;
+	std::map<int, int> DrcsSize;		// (幅 << 8) | 高さ
+	int DrcsZero = 0;					// 幅か高さが 0 の字形
 	for (const CaptionUnit &u : Units) {
 		if (u.Parameter == 0x20) Body++;
 		if (u.Parameter == 0x30 || u.Parameter == 0x31) {
@@ -1460,13 +1462,42 @@ int main(int argc, char **argv)
 			//	「上位 = 集合 / 下位 = 集合の中の符号」なので、
 			//	そのまま 2 バイトで持つと本文の 0x21 と結び付かない。
 			//	ここが合っているかを実データで見る
-			if (u.Body.size() >= 4) {
-				const int Raw = (u.Body[1] << 8) | u.Body[2];
-				const int Code = (u.Parameter == 0x30)
-								 ? (Raw & 0x7F)
-								 : ((Raw >= 0xEC00 && Raw <= 0xF8FF)
-									? Raw : (Raw & 0x7F7F));
-				DrcsDefined[Code]++;
+			//	ts_caption.cpp と同じ手順で字形まで読む。
+			//	**寸法も見る。**0 が来ると TTF を組み立てる所で
+			//	0 除算になるので、実データに 0 が来るかを確かめる
+			const BYTE *pU = u.Body.data();
+			const size_t Len = u.Body.size();
+			if (Len >= 4) {
+				size_t k = 1;
+				const int Cnt = pU[0];
+				for (int n = 0; n < Cnt && k + 3 <= Len; n++) {
+					const int Raw = (pU[k] << 8) | pU[k + 1];
+					const int Code = (u.Parameter == 0x30)
+									 ? (Raw & 0x7F)
+									 : ((Raw >= 0xEC00 && Raw <= 0xF8FF)
+										? Raw : (Raw & 0x7F7F));
+					k += 2;
+					const int Fonts = pU[k++];
+					for (int f = 0; f < Fonts && k < Len; f++) {
+						const int Mode = pU[k++] & 0x0F;
+						if (Mode > 1 || k + 3 > Len)
+							break;
+						const int Dep = pU[k], W = pU[k + 1], H = pU[k + 2];
+						k += 3;
+						int Bits = 1;
+						while ((1 << Bits) < Dep + 2)
+							Bits++;
+						const size_t Bytes =
+							(static_cast<size_t>(W) * H * Bits + 7) / 8;
+						if (k + Bytes > Len)
+							break;
+						k += Bytes;
+						DrcsDefined[Code]++;
+						DrcsSize[(W << 8) | H]++;
+						if (W == 0 || H == 0)
+							DrcsZero++;
+					}
+				}
 			}
 		}
 	}
@@ -1475,7 +1506,14 @@ int main(int argc, char **argv)
 		std::printf("  定義された外字の符号 :");
 		for (const auto &e : DrcsDefined)
 			std::printf(" 0x%04X(%d件)", e.first, e.second);
-		std::printf("\n");
+		std::printf("\n  外字の寸法 :");
+		for (const auto &e : DrcsSize)
+			std::printf(" %dx%d(%d件)", e.first >> 8, e.first & 0xFF, e.second);
+		std::printf(" / 幅か高さが 0 : %d 件\n", DrcsZero);
+
+		//	**0 が来ると TTF を組み立てる所で 0 除算になる。**
+		//	来ない前提にせず、来ても落ちない事を実装側で担保する
+		check("no DRCS glyph has a zero dimension", DrcsZero == 0);
 	}
 	std::printf("\n");
 

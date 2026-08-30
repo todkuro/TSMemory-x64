@@ -20,6 +20,11 @@ namespace {
 std::vector<std::vector<BYTE>> g_Fonts;
 
 HOST_APP_TABLE *g_pHost = nullptr;
+
+//	**初期化の中かどうか。**AviUtl2 は register_font_collection を
+//	RegisterPlugin の中でしか受け付けず、後から呼ぶと例外を投げて
+//	AviUtl2 ごと落ちる (実機で確認)
+bool g_fInitializing = true;
 EDIT_HANDLE *g_pEdit = nullptr;
 
 void LogHr(LPCWSTR pszWhat, HRESULT hr)
@@ -42,8 +47,27 @@ void TSMemoryFontSetHost(HOST_APP_TABLE *host, EDIT_HANDLE *edit)
 }
 
 
+bool TSMemoryFontCanRegister()
+{
+	return g_fInitializing;
+}
+
+
+void TSMemoryFontEndInitialize()
+{
+	g_fInitializing = false;
+}
+
+
 bool TSMemoryRegisterFontCollection(const BYTE *pData, size_t Size)
 {
+	//	**初期化の外では呼んではいけない。**
+	//	本体が例外を投げ、コールバックの中で落ちる
+	if (!g_fInitializing) {
+		TSMemoryLogWarn(L"TSMemory: フォントは初期化の時にしか登録できません "
+						L"(登録を見送りました)");
+		return false;
+	}
 	if (g_pHost == nullptr || g_pHost->register_font_collection == nullptr) {
 		TSMemoryLogWarn(L"TSMemory: register_font_collection が使えません "
 						L"(本体が対応していない可能性があります)");

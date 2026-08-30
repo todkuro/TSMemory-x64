@@ -22,6 +22,17 @@ struct EDIT_HANDLE;
 //	本体のテーブルを渡す (RegisterPlugin から呼ぶ)
 void TSMemoryFontSetHost(HOST_APP_TABLE *host, EDIT_HANDLE *edit);
 
+//	**フォントを登録出来る時期か。**
+//
+//	AviUtl2 は初期化 (RegisterPlugin) の中でしか受け付けない。
+//	取り込みの時に呼ぶと本体が例外を投げ、**AviUtl2 ごと落ちる**
+//	(実機のログ: not register except initialize in
+//	 Plugin::CommonPluginService::registerFontCollection())。
+bool TSMemoryFontCanRegister();
+
+//	初期化の始まり / 終わりを伝える (RegisterPlugin から呼ぶ)
+void TSMemoryFontEndInitialize();
+
 //	フォントデータ (TTF) を AviUtl2 に登録する。
 //
 //	pData/Size … メモリ上のフォント。呼び出し後も保持し続ける必要がある

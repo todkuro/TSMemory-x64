@@ -235,4 +235,9 @@ EXTERN_C __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE *host)
 		if (szFont[0] != L'\0')
 			TSMemoryFontProbe(szFont);
 	}
+
+	//	**ここから先はフォントを登録できない。**
+	//	AviUtl2 は RegisterPlugin の中でしか受け付けず、後から呼ぶと
+	//	例外を投げて AviUtl2 ごと落ちる (実機で確認)
+	TSMemoryFontEndInitialize();
 }

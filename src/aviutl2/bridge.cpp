@@ -268,7 +268,13 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 
 	AribToAviUtl2Options opt;
 	opt.Preset = g_State.CaptionPreset;
-	opt.DrcsFont = g_State.CaptionDrcsFont;
+	//	**フォントを登録できない時は外字を使わない。**
+	//	AviUtl2 は初期化の中でしか register_font_collection を
+	//	受け付けない。字形を持っていても登録できないので、
+	//	<@外字フォント> を出しても豆腐になるだけ。
+	//	名前を空にすると変換側が代替文字 (既定は 〓) を出す
+	opt.DrcsFont = TSMemoryFontCanRegister() ? g_State.CaptionDrcsFont
+											 : std::wstring();
 	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
 	opt.UseRuby = g_State.CaptionRuby;
 	opt.UseGlyphCache = g_State.CaptionDrcsCache;
@@ -286,12 +292,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		return false;
 	}
 
-	//	外字のフォントを本体に登録する。
-	//	メモリ上のまま渡せるのでファイルは作らない
-	if (!Source.GetFont().empty()) {
-		TSMemoryRegisterFontCollection(Source.GetFont().data(),
-									   Source.GetFont().size());
-	}
+	//	**外字のフォントはここでは登録できない。**
+	//	AviUtl2 は RegisterPlugin の中でしか受け付けず、後から呼ぶと
+	//	例外を投げて AviUtl2 ごと落ちる (実機のログ:
+	//	 not register except initialize in
+	//	 Plugin::CommonPluginService::registerFontCollection())。
+	//	その為 opt.DrcsFont を空にしてあり、外字は代替文字で出る
 
 	const double Rate = (edit->info != nullptr && edit->info->scale > 0)
 						? static_cast<double>(edit->info->rate) / edit->info->scale : 0.0;
@@ -527,7 +533,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	}
 
 	//	**外字が化ける時はここを見る。**どの符号をどこから拾ったかが判る
-	if (g_State.CaptionDebug && Source.GetGlyphReport()[0] != L' ') {
+	if (g_State.CaptionDebug && Source.GetGlyphReport()[0] != L'\0') {
 		WCHAR szg[512];
 		::StringCchPrintfW(szg, ARRAYSIZE(szg), L"TSMemory: 外字の内訳 : %s",
 						   Source.GetGlyphReport());

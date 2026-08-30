@@ -141,6 +141,10 @@ struct State {
 	int ScaleH = 10;
 	int ScaleV = 10;
 
+	//	RPC で指定された「次の文字を繰り返す回数」。-1 なら指定なし、
+	//	0 なら行末まで。**1 文字書くと使い切る**
+	int Repeat = -1;
+
 	//	1 文字分の送り幅・送り高さ
 	int PitchX() const { return (CharW + SpaceH) * ScaleH / 10; }
 	int PitchY() const { return (CharH + SpaceV) * ScaleV / 10; }
@@ -230,6 +234,18 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 			const int Num = Param[1] % 100;
 			if (Map < 8 && Num < 16)
 				PushSimple(pOut, AribItemType::Ornament, 1, Map * 16 + Num);
+		}
+		break;
+	case 0x5B:		// PLD : 半行下
+	case 0x5C:		// PLU : 半行上
+		//	上付き・下付きや、局によってはルビに使われる。
+		//	無視すると本文と同じ行に混ざる。
+		//	**半行なので行の区切りにはならない** (変換側の閾値は
+		//	行送りの 3/4 なので、半行は同じ行のままになる)
+		if (pSt->PenY >= 0) {
+			pSt->PenY += (Final == 0x5B ? 1 : -1) * pSt->PitchY() / 2;
+			PushSimple(pOut, AribItemType::Position, pSt->PenX, pSt->PenY,
+					   pSt->PitchY(), pSt->PitchX());
 		}
 		break;
 	case 0x61:		// ACPS : 表示位置 (ドット)
@@ -373,6 +389,49 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				   st.PitchY(), st.PitchX());
 	};
 
+	//	RPC で「次の文字を繰り返す」と指定されていたら、その回数を返す。
+	//	**0 は行末まで。**caption.dll (TVCaptionMod2 が使っている物) が
+	//	  m_wRPC = P1 - 0x40 とし、0 の時は右端まで詰めてから改行する。
+	//	壊れたデータで暴走しないよう上限を設ける
+	auto RepeatCount = [&]() {
+		if (st.Repeat < 0)
+			return 1;
+		const int Times = st.Repeat;
+		st.Repeat = -1;						// 1 文字で使い切る
+		if (Times > 0)
+			return (Times > 512) ? 512 : Times;
+
+		const int Width = (st.AreaW > 0) ? st.AreaW : st.PlaneW;
+		if (st.PenX < 0 || st.PitchX() <= 0)
+			return 1;
+		const int Room = (st.OrigX + Width - st.PenX) / st.PitchX();
+		return (Room < 1) ? 1 : ((Room > 512) ? 512 : Room);
+	};
+
+	//	文字を 1 つ書く (折り返しと繰り返しの面倒を見る)
+	auto PutText = [&](const std::wstring &s) {
+		if (s.empty())
+			return;
+		const int Times = RepeatCount();
+		for (int k = 0; k < Times; k++) {
+			Wrap();
+			const int Left = st.PenX;
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushText(pOut, s, Left, st.PenX);
+		}
+	};
+
+	//	外字を 1 つ書く
+	auto PutDrcs = [&](int Code) {
+		const int Times = RepeatCount();
+		for (int k = 0; k < Times; k++) {
+			Wrap();
+			const int Left = st.PenX;
+			if (st.PenX >= 0) st.PenX += st.PitchX();
+			PushSimple(pOut, AribItemType::Drcs, Code, 0, st.PenX, Left);
+		}
+	};
+
 	for (size_t i = 0; i < Size; ) {
 		const BYTE b = pData[i];
 
@@ -419,12 +478,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				//	**空白も 1 文字分の枠を占める。**半角の空白にすると
 				//	送り幅と合わず、その行だけ詰まって見える。
 				//	中型の時は変換側が半角の空白に差し替える
-				{
-					Wrap();
-					const int Left = st.PenX;
-					if (st.PenX >= 0) st.PenX += st.PitchX();
-					PushText(pOut, L"　", Left, st.PenX);
-				}
+				PutText(L"　");
 				break;
 			case 0x1B: {	// ESC
 				if (i >= Size) break;
@@ -523,7 +577,18 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			case 0x94:	// WMM (1)
 			case 0x95:	// MACRO (1)
 			case 0x97:	// HLC (1)。**囲み。消費しないと引数が本文に混ざる**
-			case 0x98:	// RPC (1)
+				i++;
+				break;
+
+			case 0x98:	// RPC (1) : 次の文字を繰り返す
+				//	**回数は P1 - 0x40。0 なら行末まで。**
+				//	caption.dll (TVCaptionMod2 が使っている物) と同じ。
+				//	無視すると 1 文字しか出ず、その行の以降の位置も
+				//	繰り返した分だけ左にずれる
+				if (i < Size) {
+					const int n = pData[i] - 0x40;
+					st.Repeat = (n >= 0) ? n : -1;
+				}
 				i++;
 				break;
 
@@ -548,68 +613,44 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			const BYTE c2 = pData[i + 1] & 0x7F;
 			i += 2;
 
-			//	**1 文字ごとに左右の X を持たせる。**ルビをどの字に
-			//	掛けるかは X の重なりで決めるので、書き始めの位置が要る
-			Wrap();
-			const int Left = st.PenX;
 			if (Set == CharSet::Drcs2) {
-				if (st.PenX >= 0) st.PenX += st.PitchX();
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0,
-						   st.PenX, Left);
+				PutDrcs((c1 << 8) | c2);
 				continue;
 			}
-			const int Ku = c1 - 0x20;
-			const int Ten = c2 - 0x20;
-			const std::wstring s = KuTenToText(Ku, Ten);
-			if (st.PenX >= 0) st.PenX += st.PitchX();
+			const std::wstring s = KuTenToText(c1 - 0x20, c2 - 0x20);
 			if (s.empty()) {
 				//	表に無い区点。外字と同じ扱いにして
 				//	呼び出し側で判断出来るようにする
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0,
-						   st.PenX, Left);
+				PutDrcs((c1 << 8) | c2);
 			} else {
-				PushText(pOut, s, Left, st.PenX);
+				PutText(s);
 			}
 			continue;
 		}
 
 		i++;
-		//	**マクロと外字以外は文字を書くので、先に折り返しを見る**
-		if (Set != CharSet::Macro)
-			Wrap();
-		const int Left = st.PenX;
 		switch (Set) {
 		case CharSet::Alnum:
 			//	**英数は全角。**中型 (MSZ) の時は変換側が半角に差し替える
-			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)),
-					 Left, st.PenX);
+			PutText(OneByteToText(::TSMemoryAribAlnum(c1)));
 			break;
 		case CharSet::Hiragana:
-			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)),
-					 Left, st.PenX);
+			PutText(OneByteToText(::TSMemoryAribHiragana(c1)));
 			break;
 		case CharSet::Katakana:
-			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)),
-					 Left, st.PenX);
+			PutText(OneByteToText(::TSMemoryAribKatakana(c1)));
 			break;
 		case CharSet::JisKatakana:
 			//	**この文字集合だけは中型 (MSZ) で丸ごと半角に写す。**
 			//	もともと半角の片仮名の集合であり、全角の片仮名集合
 			//	(ESC 0x31) とは扱いが違う。全角のまま <tw0.5> で
 			//	潰すと字形が歪む。libaribcaption も同じ分け方をしている
-			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut,
-					 OneByteToText(st.ScaleH * 2 == st.ScaleV
-								   ? ::TSMemoryAribJisKatakanaHalf(c1)
-								   : ::TSMemoryAribJisKatakana(c1)),
-					 Left, st.PenX);
+			PutText(OneByteToText(st.ScaleH * 2 == st.ScaleV
+								  ? ::TSMemoryAribJisKatakanaHalf(c1)
+								  : ::TSMemoryAribJisKatakana(c1)));
 			break;
 		case CharSet::Drcs1:
-			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushSimple(pOut, AribItemType::Drcs, c1, 0, st.PenX, Left);
+			PutDrcs(c1);
 			break;
 		case CharSet::Macro: {
 			//	**マクロは文字ではない。**中身は文字集合を割り当てる

@@ -457,6 +457,81 @@ void RunUnitTests()
 		check("APF and PAPF move the pen", Left == 290);
 	}
 
+	//	5b7. **RPC (0x98) = 次の文字を繰り返す。**回数は P1 - 0x40。
+	//	   無視すると 1 文字しか出ず、以降の位置も繰り返した分ずれる。
+	//	   caption.dll (TVCaptionMod2 が使っている物) と同じ解釈
+	{
+		//	SSM 36;36 / SHS 4 (送り 40) / ACPS 170;449 / RPC 3 / 「あ」
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x34, 0x20, 0x58,
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x98, 0x43,				// RPC 3 (0x43 - 0x40)
+			0x24, 0x22,				// あ
+			0x24, 0x24,				// い (繰り返しは使い切られている)
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("RPC repeats the next character",
+			  AribItemsToPlainText(Items) == L"あああい");
+
+		//	送りも繰り返した分だけ進む。170 + 4 * 40 = 330
+		int Last = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Text)
+				Last = it.C;
+		}
+		check("RPC advances the pen for every copy", Last == 330);
+	}
+
+	//	5b8. **RPC 0 = 行末まで繰り返す。**
+	{
+		//	SDP 170;30 / SDF 200;480 (右端 370) なので 5 文字分入る
+		const BYTE d[] = {
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x33, 0x30, 0x20, 0x5F,
+			0x9B, 0x32, 0x30, 0x30, 0x3B, 0x34, 0x38, 0x30, 0x20, 0x56,
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x34, 0x20, 0x58,
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x98, 0x40,				// RPC 0 = 行末まで
+			0x24, 0x22,				// あ
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("RPC 0 fills to the end of the line",
+			  AribItemsToPlainText(Items) == L"あああああ");
+	}
+
+	//	5b9. **PLD / PLU = 半行下 / 半行上。**上付き・下付きに使われる。
+	//	   **半行なので行の区切りにはならない**
+	//	   (変換側の閾値は行送りの 3/4)
+	{
+		//	ACPS 170;449 / PLD / 「あ」
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x32, 0x34, 0x20, 0x59,
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x9B, 0x20, 0x5B,		// PLD
+			0x24, 0x22,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int LastY = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position)
+				LastY = it.B;
+		}
+		//	行送り 60 の半分だけ下がる
+		check("PLD moves the pen down half a row", LastY == 449 + 30);
+
+		AribToAviUtl2Options o2;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("a half-row move does not split the line", L.Lines.size() == 1);
+	}
+
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
 	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
 	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、

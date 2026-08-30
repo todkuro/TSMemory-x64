@@ -95,10 +95,35 @@ bool TSMemoryRegisterFontCollection(const BYTE *pData, size_t Size)
 			reinterpret_cast<::IDWriteFontCollection *>(
 				static_cast<IDWriteFontCollection *>(pCollection)));
 		fOK = true;
-		WCHAR sz[128];
+
+		//	**名前も出す。**利用者が `<@名前>` で指すのはこの名前で、
+		//	AviUtl2 のフォント一覧に出るかどうかとは別の話。
+		//	一覧に出なくても、この名前で描画は出来る
+		std::wstring Names;
+		const UINT32 Count = pCollection->GetFontFamilyCount();
+		for (UINT32 n = 0; n < Count && n < 8; n++) {
+			//	IDWriteFontCollection1 の GetFontFamily は
+			//	IDWriteFontFamily1 を返す
+			IDWriteFontFamily1 *pFamily = nullptr;
+			if (FAILED(pCollection->GetFontFamily(n, &pFamily)) || pFamily == nullptr)
+				continue;
+			IDWriteLocalizedStrings *pNames = nullptr;
+			if (SUCCEEDED(pFamily->GetFamilyNames(&pNames)) && pNames != nullptr) {
+				WCHAR szName[64] = {};
+				if (SUCCEEDED(pNames->GetString(0, szName, ARRAYSIZE(szName)))) {
+					if (!Names.empty())
+						Names += L" / ";
+					Names += szName;
+				}
+				pNames->Release();
+			}
+			pFamily->Release();
+		}
+
+		WCHAR sz[256];
 		::StringCchPrintfW(sz, ARRAYSIZE(sz),
-						   L"TSMemory: フォントを登録しました (%u ファミリ)",
-						   pCollection->GetFontFamilyCount());
+						   L"TSMemory: フォントを登録しました (%u ファミリ : %s)",
+						   Count, Names.empty() ? L"名前を取れません" : Names.c_str());
 		TSMemoryLog(sz);
 	} else {
 		LogHr(L"フォントコレクションの作成に失敗", hr);

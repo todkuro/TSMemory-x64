@@ -85,6 +85,10 @@ double PtsDiffSeconds(int64_t From, int64_t To)
 struct Pids {
 	std::vector<WORD> Caption;		// component_tag 0x30-0x37
 	WORD Video = 0;
+	//	PMT の program_number = サービス ID。
+	//	**字幕 PID だけでは足りない。**別のチャンネルでも同じ番号
+	//	(0x0110 等) を使っている事が多く、外字の字形を取り違える
+	WORD Service = 0;
 };
 
 //---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ struct Pids {
 //
 //	**符号 (0x21 から順) の意味は番組ごとに変わる。**
 //	番組が変われば `0x21` が別の字形に割り当て直されるので、
-//	  ・字幕 PID ごとに分ける (チャンネルが変われば別)
+//	  ・**サービス ID と字幕 PID**ごとに分ける (チャンネルが変われば別)
 //	  ・古い物は使わない (下記の時間で切る)
 //	の 2 つで古い字形を掴まないようにしている。
 //	それでも同じチャンネルで番組をまたぐと取り違え得るので、
@@ -110,12 +114,18 @@ struct CachedGlyph {
 	DWORD Tick;
 };
 
-//	キーは (字幕 PID << 16) | 符号
-std::map<DWORD, CachedGlyph> g_GlyphCache;
+//	キーは (サービス ID << 32) | (字幕 PID << 16) | 符号。
+//
+//	**サービス ID まで入れる事。**字幕 PID は別のチャンネルでも
+//	同じ番号 (0x0110 等) を使っている事が多く、PID だけを鍵にすると
+//	チャンネルを変えた後に前のチャンネルの字形を引いてしまう
+std::map<UINT64, CachedGlyph> g_GlyphCache;
 
-DWORD GlyphKey(WORD Pid, int Code)
+UINT64 GlyphKey(WORD Service, WORD Pid, int Code)
 {
-	return (static_cast<DWORD>(Pid) << 16) | (static_cast<DWORD>(Code) & 0xFFFF);
+	return (static_cast<UINT64>(Service) << 32)
+		 | (static_cast<UINT64>(Pid) << 16)
+		 | (static_cast<UINT64>(Code) & 0xFFFF);
 }
 
 //	PAT/PMT から字幕と映像の PID を拾う
@@ -163,6 +173,8 @@ Pids FindPids(const std::vector<BYTE> &Ts)
 		size_t End = o + 3 + Len - 4;
 		if (End > TS_PACKET_SIZE)
 			End = TS_PACKET_SIZE;
+		if (Out.Service == 0)
+			Out.Service = static_cast<WORD>((p[o + 3] << 8) | p[o + 4]);
 		const size_t InfoLen = ((p[o + 10] & 0x0F) << 8) | p[o + 11];
 		size_t q = o + 12 + InfoLen;
 		while (q + 5 <= End) {
@@ -482,7 +494,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			CachedGlyph c;
 			c.Glyph = e.second;
 			c.Tick = Now;
-			g_GlyphCache[GlyphKey(CaptionPid, e.first)] = c;
+			g_GlyphCache[GlyphKey(pids.Service, CaptionPid, e.first)] = c;
 		}
 	}
 
@@ -499,7 +511,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 				bool fCached = false;
 				if (Options.UseGlyphCache && CaptionPid != 0) {
 					auto c = g_GlyphCache.find(
-						GlyphKey(CaptionPid, DrcsCodes[i]));
+						GlyphKey(pids.Service, CaptionPid, DrcsCodes[i]));
 					if (c != g_GlyphCache.end()
 							&& Now - c->second.Tick <= GLYPH_CACHE_LIFE_MS) {
 						TSMemoryDrcsGlyph g = c->second.Glyph;

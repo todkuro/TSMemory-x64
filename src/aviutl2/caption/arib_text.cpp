@@ -99,12 +99,19 @@ struct State {
 	//	字幕平面の作り。CSI で指定されて来る。
 	//	既定は SWF 7 (960x540) の標準的な値
 	int OrigX = 0, OrigY = 0;		// SDP : 表示領域の左上
+	//	SDF : 表示領域の大きさ。**右端で自動的に折り返す。**
+	//	読まないと 1 行に繋がる (実測: 平面 960 幅に対し
+	//	右端 1230 まで伸びていた)。0 なら字幕平面いっぱい
+	int AreaW = 0, AreaH = 0;
 	int CharW = 36, CharH = 36;		// SSM : 文字の大きさ
 	int SpaceH = 4, SpaceV = 24;	// SHS / SVS : 字間・行間
 	int PlaneW = 960, PlaneH = 540;	// SWF : 字幕平面そのものの大きさ
 
-	//	ペンの位置。ACPS / APS で動き、文字を書くと 1 文字分進む
+	//	ペンの位置。ACPS / APS で動き、文字を書くと 1 文字分進む。
+	//	**PenY は自動改行に要る。**折り返した時に 1 行下の座標を
+	//	作らないと、呼び出し側は行が変わった事に気付けない
 	int PenX = -1;
+	int PenY = -1;
 
 	//	今の文字の大きさ。10 倍した整数で持つ (5 = 半分 / 20 = 倍)。
 	//	**縦横を別に持つ。**SZX には「縦だけ 2 倍」「横だけ 2 倍」があり、
@@ -161,6 +168,9 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	case 0x5F:		// SDP : 表示領域の左上
 		if (Count >= 2) { pSt->OrigX = Param[0]; pSt->OrigY = Param[1]; }
 		break;
+	case 0x56:		// SDF : 表示領域の大きさ (右端で折り返す)
+		if (Count >= 2) { pSt->AreaW = Param[0]; pSt->AreaH = Param[1]; }
+		break;
 	case 0x53:		// SWF : 表示書式 (字幕平面の大きさ)
 		if (Count >= 1) {
 			switch (Param[0]) {
@@ -206,6 +216,7 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	case 0x61:		// ACPS : 表示位置 (ドット)
 		if (Count >= 2) {
 			pSt->PenX = Param[0];
+			pSt->PenY = Param[1];
 			PushSimple(pOut, AribItemType::Position, Param[0], Param[1],
 					   pSt->PitchY(), pSt->PitchX());
 		}
@@ -311,6 +322,24 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				std::vector<AribItem> *pOut, int Depth)
 {
 
+	//	**表示領域の右端に来たら折り返す。**
+	//	放送は 1 行に収まらない字幕をこれで 2 行にしている。
+	//	読まないと 1 行に繋がったまま画面をはみ出す
+	//	(実測: 平面 960 幅に対して右端が 1230 になっていた)。
+	//	文字を書く直前に呼ぶ事
+	auto Wrap = [&]() {
+		if (st.PenX < 0 || st.PenY < 0)
+			return;
+		const int Width = (st.AreaW > 0) ? st.AreaW : st.PlaneW;
+		//	ちょうど収まる字は折り返さない
+		if (st.PenX + st.PitchX() <= st.OrigX + Width)
+			return;
+		st.PenX = st.OrigX;
+		st.PenY += st.PitchY();
+		PushSimple(pOut, AribItemType::Position, st.PenX, st.PenY,
+				   st.PitchY(), st.PitchX());
+	};
+
 	for (size_t i = 0; i < Size; ) {
 		const BYTE b = pData[i];
 
@@ -333,9 +362,10 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					const int Row = pData[i] & 0x3F;
 					const int Col = pData[i + 1] & 0x3F;
 					st.PenX = st.OrigX + Col * st.PitchX();
+					st.PenY = st.OrigY + (Row + 1) * st.PitchY();
 					PushSimple(pOut, AribItemType::Position,
 							   st.PenX,
-							   st.OrigY + (Row + 1) * st.PitchY(),
+							   st.PenY,
 							   st.PitchY(), st.PitchX());
 				}
 				i += 2;
@@ -345,6 +375,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				//	送り幅と合わず、その行だけ詰まって見える。
 				//	中型の時は変換側が半角の空白に差し替える
 				{
+					Wrap();
 					const int Left = st.PenX;
 					if (st.PenX >= 0) st.PenX += st.PitchX();
 					PushText(pOut, L"　", Left, st.PenX);
@@ -470,6 +501,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 
 			//	**1 文字ごとに左右の X を持たせる。**ルビをどの字に
 			//	掛けるかは X の重なりで決めるので、書き始めの位置が要る
+			Wrap();
 			const int Left = st.PenX;
 			if (Set == CharSet::Drcs2) {
 				if (st.PenX >= 0) st.PenX += st.PitchX();
@@ -493,6 +525,9 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 		}
 
 		i++;
+		//	**マクロと外字以外は文字を書くので、先に折り返しを見る**
+		if (Set != CharSet::Macro)
+			Wrap();
 		const int Left = st.PenX;
 		switch (Set) {
 		case CharSet::Alnum:

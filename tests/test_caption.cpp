@@ -24,6 +24,11 @@ namespace {
 
 int g_failures = 0;
 
+//	第 3 引数で与える検索文字列 (省略時は nullptr)。
+//	--dump の出力は先頭 12 件だけなので、実データの不具合を追う時に
+//	見たい字幕を絞る為に使う
+const wchar_t *g_pszFind = nullptr;
+
 void check(const char *what, bool ok)
 {
 	std::printf("%-56s %s\n", what, ok ? "ok" : "FAILED");
@@ -351,6 +356,56 @@ void RunUnitTests()
 		AribCaptionLayout L;
 		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
 		check("a clear-only unit produces no line", L.Lines.empty());
+	}
+
+	//	5b3. **SDF (CSI ... 0x20 'V') = 表示領域。右端で自動的に折り返す。**
+	//	   放送は 1 行に収まらない字幕をこれで 2 行にしている。
+	//	   読まないと 1 行に繋がったまま画面をはみ出す
+	//	   (実測: 平面 960 幅に対して右端が 1230 になっていた)
+	{
+		//	SDP 170;30 / SDF 200;480 (右端 = 170+200 = 370) /
+		//	SSM 36;36 / SHS 4 (送り 40) / ACPS 170;449 のあと「あいうえお」
+		const BYTE d[] = {
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x33, 0x30, 0x20, 0x5F,
+			0x9B, 0x32, 0x30, 0x30, 0x3B, 0x34, 0x38, 0x30, 0x20, 0x56,
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,
+			0x9B, 0x34, 0x20, 0x58,
+			0x9B, 0x32, 0x34, 0x20, 0x59,
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x24, 0x22, 0x24, 0x24, 0x24, 0x26, 0x24, 0x28, 0x24, 0x2A,
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+
+		//	170,210,250,290,330 の 5 文字目までは収まる (330+40 = 370)。
+		//	6 文字目は 370+40 > 370 なので折り返す
+		int Positions = 0, LastY = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position) {
+				Positions++;
+				LastY = it.B;
+			}
+		}
+		check("SDF makes the pen wrap at the right edge",
+			  Positions == 1 && AribItemsToPlainText(Items) == L"あいうえお");
+
+		//	6 文字目を足すと折り返しの位置指定が増える
+		std::vector<BYTE> e(d, d + sizeof(d));
+		e.push_back(0x24); e.push_back(0x2B);		// か
+		Items.clear();
+		AribDecodeText(e.data(), e.size(), &Items);
+		Positions = 0; LastY = -1;
+		int WrapX = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position) {
+				Positions++;
+				WrapX = it.A;
+				LastY = it.B;
+			}
+		}
+		//	折り返し先は表示領域の左端、1 行 (36+24=60) 下
+		check("the wrapped line starts at the left edge one row below",
+			  Positions == 2 && WrapX == 170 && LastY == 449 + 60);
 	}
 
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
@@ -1052,6 +1107,17 @@ int main(int argc, char **argv)
 
 	const char *pszPath = argc > 1 ? argv[1] : nullptr;
 	const bool fDump = argc > 2 && std::strcmp(argv[2], "--dump") == 0;
+	std::wstring Find;
+	if (argc > 3) {
+		//	**argv は ANSI (日本語環境なら CP932)。**
+		//	UTF-8 で変換すると日本語が化けて一致しなくなる
+		const int n = ::MultiByteToWideChar(CP_ACP, 0, argv[3], -1, nullptr, 0);
+		if (n > 1) {
+			Find.resize(n - 1);
+			::MultiByteToWideChar(CP_ACP, 0, argv[3], -1, &Find[0], n);
+			g_pszFind = Find.c_str();
+		}
+	}
 	if (pszPath == nullptr) {
 		std::printf("%s (%d failure%s)\n", g_failures == 0 ? "PASS" : "FAIL",
 					g_failures, g_failures == 1 ? "" : "s");
@@ -1071,14 +1137,29 @@ int main(int argc, char **argv)
 		const long long Size = _ftelli64(fp);
 		_fseeki64(fp, 0, SEEK_SET);
 
-		//	全部読む必要は無い。字幕は全編に散っているので先頭の一部で足りる
-		const long long Limit = 512LL * 1024 * 1024;
-		const size_t Want = static_cast<size_t>(Size < Limit ? Size : Limit);
+		//	全部読む必要は無い。字幕は全編に散っているので先頭の一部で足りる。
+		//	**見たい字幕が先頭に無い事もある**ので、環境変数で
+		//	読む範囲を動かせるようにしてある (実データの不具合を追う時用)
+		//	  TSMEMORY_TS_OFFSET_MB … 何 MB 目から読むか
+		//	  TSMEMORY_TS_LIMIT_MB  … 何 MB 読むか
+		long long Offset = 0;
+		long long Limit = 512LL * 1024 * 1024;
+		if (const char *p = std::getenv("TSMEMORY_TS_OFFSET_MB"))
+			Offset = ::atoll(p) * 1024 * 1024 / 188 * 188;
+		if (const char *p = std::getenv("TSMEMORY_TS_LIMIT_MB"))
+			Limit = ::atoll(p) * 1024 * 1024;
+		if (Offset > Size)
+			Offset = 0;
+		_fseeki64(fp, Offset, SEEK_SET);
+
+		const long long Rest = Size - Offset;
+		const size_t Want = static_cast<size_t>(Rest < Limit ? Rest : Limit);
 		Ts.resize(Want);
 		Ts.resize(std::fread(Ts.data(), 1, Ts.size(), fp));
 		std::fclose(fp);
-		std::printf("read %.0f MB of %.0f MB\n",
-					Ts.size() / 1048576.0, Size / 1048576.0);
+		std::printf("read %.0f MB of %.0f MB (offset %.0f MB)\n",
+					Ts.size() / 1048576.0, Size / 1048576.0,
+					Offset / 1048576.0);
 	}
 	std::printf("TS file : %s (%zu packets)\n", pszPath, Ts.size() / TS_PACKET_SIZE);
 
@@ -1258,7 +1339,12 @@ int main(int argc, char **argv)
 		if (fHasChar) {
 			WithText++;
 			TotalChars += s.size();
-			if (Samples.size() < 12) {
+			//	**探したい字幕を第 3 引数で絞れる。**
+			//	先頭 12 件しか出さないので、実データの不具合を
+			//	追う時に見たい字幕が出て来ない
+			const bool fMatch = (g_pszFind == nullptr)
+								|| (s.find(g_pszFind) != std::wstring::npos);
+			if (fMatch && Samples.size() < 12) {
 				Samples.push_back(s);
 				//	AviUtl2 のテキストに直した形も見る
 				AribToAviUtl2Options opt;

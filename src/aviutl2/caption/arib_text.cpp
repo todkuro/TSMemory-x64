@@ -216,19 +216,19 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 	return i;
 }
 
-void PushText(std::vector<AribItem> *pOut, const std::wstring &s, int PenX = -1)
+//	**1 文字ずつ別の項目にする。まとめてはいけない。**
+//	まとめると 1 文字ごとの X が判らなくなり、ルビをどの字に
+//	掛けるかを決められない。変換後の文字列は繋げるだけなので変わらない
+void PushText(std::vector<AribItem> *pOut, const std::wstring &s,
+			  int Left = -1, int Right = -1)
 {
 	if (s.empty())
 		return;
-	if (!pOut->empty() && pOut->back().Type == AribItemType::Text) {
-		pOut->back().Text += s;
-		pOut->back().C = PenX;		// 書き終えた後のペンの X
-		return;
-	}
 	AribItem it;
 	it.Type = AribItemType::Text;
 	it.Text = s;
-	it.C = PenX;
+	it.C = Right;		// 書き終えた後のペンの X
+	it.D = Left;		// 書き始めた時のペンの X
 	pOut->push_back(it);
 }
 
@@ -344,8 +344,11 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				//	**空白も 1 文字分の枠を占める。**半角の空白にすると
 				//	送り幅と合わず、その行だけ詰まって見える。
 				//	中型の時は変換側が半角の空白に差し替える
-				if (st.PenX >= 0) st.PenX += st.PitchX();
-				PushText(pOut, L"　", st.PenX);
+				{
+					const int Left = st.PenX;
+					if (st.PenX >= 0) st.PenX += st.PitchX();
+					PushText(pOut, L"　", Left, st.PenX);
+				}
 				break;
 			case 0x1B: {	// ESC
 				if (i >= Size) break;
@@ -465,9 +468,13 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			const BYTE c2 = pData[i + 1] & 0x7F;
 			i += 2;
 
+			//	**1 文字ごとに左右の X を持たせる。**ルビをどの字に
+			//	掛けるかは X の重なりで決めるので、書き始めの位置が要る
+			const int Left = st.PenX;
 			if (Set == CharSet::Drcs2) {
 				if (st.PenX >= 0) st.PenX += st.PitchX();
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0, st.PenX);
+				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0,
+						   st.PenX, Left);
 				continue;
 			}
 			const int Ku = c1 - 0x20;
@@ -477,27 +484,32 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			if (s.empty()) {
 				//	表に無い区点。外字と同じ扱いにして
 				//	呼び出し側で判断出来るようにする
-				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0, st.PenX);
+				PushSimple(pOut, AribItemType::Drcs, (c1 << 8) | c2, 0,
+						   st.PenX, Left);
 			} else {
-				PushText(pOut, s, st.PenX);
+				PushText(pOut, s, Left, st.PenX);
 			}
 			continue;
 		}
 
 		i++;
+		const int Left = st.PenX;
 		switch (Set) {
 		case CharSet::Alnum:
 			//	**英数は全角。**中型 (MSZ) の時は変換側が半角に差し替える
 			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)), st.PenX);
+			PushText(pOut, OneByteToText(::TSMemoryAribAlnum(c1)),
+					 Left, st.PenX);
 			break;
 		case CharSet::Hiragana:
 			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)), st.PenX);
+			PushText(pOut, OneByteToText(::TSMemoryAribHiragana(c1)),
+					 Left, st.PenX);
 			break;
 		case CharSet::Katakana:
 			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)), st.PenX);
+			PushText(pOut, OneByteToText(::TSMemoryAribKatakana(c1)),
+					 Left, st.PenX);
 			break;
 		case CharSet::JisKatakana:
 			//	**この文字集合だけは中型 (MSZ) で丸ごと半角に写す。**
@@ -509,11 +521,11 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					 OneByteToText(st.ScaleH * 2 == st.ScaleV
 								   ? ::TSMemoryAribJisKatakanaHalf(c1)
 								   : ::TSMemoryAribJisKatakana(c1)),
-					 st.PenX);
+					 Left, st.PenX);
 			break;
 		case CharSet::Drcs1:
 			if (st.PenX >= 0) st.PenX += st.PitchX();
-			PushSimple(pOut, AribItemType::Drcs, c1, 0, st.PenX);
+			PushSimple(pOut, AribItemType::Drcs, c1, 0, st.PenX, Left);
 			break;
 		case CharSet::Macro: {
 			//	**マクロは文字ではない。**中身は文字集合を割り当てる

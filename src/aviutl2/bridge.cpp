@@ -50,6 +50,9 @@ struct BridgeState {
 	std::wstring CaptionPreset;           // 本文の先頭に入れる <$...>
 	std::wstring CaptionDrcsFont = L"TSMemory DRCS";
 	bool CaptionBroadcastColor = true;    // 放送の指定した色をそのまま使うか
+	//	ルビを </>漢字<!>ふりがな</> にするか。
+	//	0 にすると従来どおり小型のまま本文に混ぜる
+	bool CaptionRuby = true;
 	bool CaptionBackColor = true;         // 放送の背景色を影・縁色に流すか
 	bool CaptionBroadcastSize = false;    // 放送の文字の大きさに合わせるか
 	bool CaptionPosition = true;          // 放送の位置に合わせるか
@@ -265,6 +268,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	opt.Preset = g_State.CaptionPreset;
 	opt.DrcsFont = g_State.CaptionDrcsFont;
 	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
+	opt.UseRuby = g_State.CaptionRuby;
 	opt.UseBroadcastBackColor = g_State.CaptionBackColor;
 	opt.UseBroadcastSize = g_State.CaptionBroadcastSize;
 	opt.ScreenHeight = (edit->info != nullptr) ? edit->info->height : 0;
@@ -837,6 +841,8 @@ bool TSMemoryBridgeStart(HOST_APP_TABLE *host, EDIT_HANDLE *edit, LOG_HANDLE *lo
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingX", 8, ini_file);
 		g_State.CaptionBackPaddingY =
 			::GetPrivateProfileIntW(L"Caption", L"BackPaddingY", 4, ini_file);
+		g_State.CaptionRuby =
+			::GetPrivateProfileIntW(L"Caption", L"Ruby", 1, ini_file) != 0;
 		g_State.CaptionBackOutline =
 			::GetPrivateProfileIntW(L"Caption", L"BackOutline", 2, ini_file);
 		g_State.CaptionBackDebug =

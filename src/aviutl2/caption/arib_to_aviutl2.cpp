@@ -3,6 +3,7 @@
 //----------------------------------------------------------------------------
 #include <windows.h>
 
+#include <algorithm>
 #include <string>
 #include <cwchar>
 #include <vector>
@@ -123,10 +124,91 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	int BaseSize = 0;
 	bool fSizeEmitted = false;
 
+	//	--- ルビ -------------------------------------------------------------
+	//	**ルビは小型 (SSZ) で本文の 1 行上に書かれる。**
+	//	まとまりごとに位置が打たれるので、X の重なりで本文のどの字に
+	//	掛かるかが決まる (実測の生バイト):
+	//
+	//	  88                       SSZ (小型)
+	//	  CSI "230;449" SP 'a'     ルビ 1 つ目の位置
+	//	  あ い ぞ う
+	//	  CSI "390;449" SP 'a'     ルビ 2 つ目の位置
+	//	  う ず ま
+	//	  CSI "170;509" SP 'a'     本文の位置 (1 行下)
+	//	  8A                       NSZ (標準)
+	//	  ♬ 愛 憎 愛 憎 渦 巻 い て
+	//
+	//	  -> ♬ </>愛憎<!>あいぞう</></>渦巻<!>うずま</>いて
+	struct RubyRun {
+		int Left = 0;
+		int Right = 0;
+		std::wstring Text;
+	};
+	std::vector<RubyRun> Rubies;
+	bool fRubyOpen = false;		// 直前の文字と同じまとまりか
+
+	//	本文の文字ごとの、Cur.Text の中の位置と字幕平面での X
+	struct CharBox {
+		size_t Begin;
+		size_t End;
+		int Left;
+		int Right;
+	};
+	std::vector<CharBox> Boxes;
+
 	//	**これから書く一続きの文字が既に半角かどうか。**
 	//	真なら横倍率 <tw> を掛けない。中型 (MSZ) は「横に潰す」ではなく
 	//	「半角形を使う」指定で、潰すと `。` の丸が楕円になる (実機で発生)
 	bool fRunHalfwidth = false;
+
+	//	行を閉じる直前に呼ぶ。溜めておいたルビを本文に括り付ける。
+	//	**後ろから入れる事。**前から入れると後ろの位置がずれる
+	auto ApplyRuby = [&]() {
+		if (!Rubies.empty() && !Boxes.empty()) {
+			std::sort(Rubies.begin(), Rubies.end(),
+					  [](const RubyRun &a, const RubyRun &b) {
+						  return a.Left < b.Left;
+					  });
+			for (size_t n = Rubies.size(); n-- > 0; ) {
+				const RubyRun &r = Rubies[n];
+				//	**その字の半分以上に掛かっていたら含める。**
+				//	少しでも重なれば含める形にすると、ルビが本文より
+				//	広い時に隣の字まで巻き込む
+				//	(実測: 「大東京狂騒歌って」のルビ「きょうそう」が
+				//	 5 文字 = 100 ドットあり、狂騒 80 ドットからはみ出した
+				//	 20 ドットで「歌」まで括ってしまっていた)。
+				//	**ちょうど半分は含める。**外すと 1 文字のルビが
+				//	どの字にも掛からず消える (「然(さ)らば」のルビ
+				//	「さ」は 20 ドットで、字幅 40 のちょうど半分)。
+				//
+				//	**この判定では分けられない組がある。**
+				//	  渦巻(うずま)  ルビ 60 / 渦 40 + 巻 40 → 巻 は重なり 20
+				//	  狂騒(きょうそう) ルビ 100 / 狂 40 + 騒 40 → 歌 も重なり 20
+				//	前者は含めたく、後者は含めたくないが、**放送のバイト列は
+				//	同じ形** (どちらも左揃えで重なり 20)。ルビが本文より
+				//	広い時だけ 1 字余分に括られるが、ルビが消えるよりは良い
+				size_t First = Boxes.size(), Last = 0;
+				for (size_t k = 0; k < Boxes.size(); k++) {
+					const int L = (Boxes[k].Left > r.Left) ? Boxes[k].Left : r.Left;
+					const int R = (Boxes[k].Right < r.Right) ? Boxes[k].Right : r.Right;
+					const int Width = Boxes[k].Right - Boxes[k].Left;
+					if (R > L && (R - L) * 2 >= Width) {
+						if (First == Boxes.size())
+							First = k;
+						Last = k;
+					}
+				}
+				if (First == Boxes.size())
+					continue;		// 掛かる字が無い
+				Cur.Text.insert(Boxes[Last].End,
+								L"<!>" + r.Text + L"</>");
+				Cur.Text.insert(Boxes[First].Begin, L"</>");
+			}
+		}
+		Rubies.clear();
+		Boxes.clear();
+		fRubyOpen = false;
+	};
 
 	//	本文を出す直前に呼ぶ。行が変わっていたら改行を入れる
 	auto NewLine = [&]() {
@@ -156,6 +238,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		if (fRow || fGap) {
 			//	**行が変わった。**ここで区切って別のオブジェクトにする
+			ApplyRuby();
 			if (!Cur.Text.empty())
 				Lines.push_back(Cur);
 			Cur = AribCaptionLine();
@@ -256,6 +339,27 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		switch (it.Type) {
 		case AribItemType::Text: {
 			NewLine();
+
+			//	**小型 (SSZ) はルビ。本文には混ぜない。**
+			//	そのまま出すと本文の頭にふりがなだけが並ぶ
+			if (Options.UseRuby && ScaleH == 5 && ScaleV == 5 && it.D >= 0) {
+				//	X が続いている間は同じまとまり
+				if (!fRubyOpen || Rubies.empty()
+						|| Rubies.back().Right != it.D) {
+					RubyRun r;
+					r.Left = it.D;
+					r.Right = it.C;
+					r.Text = it.Text;
+					Rubies.push_back(r);
+				} else {
+					Rubies.back().Text += it.Text;
+					Rubies.back().Right = it.C;
+				}
+				fRubyOpen = true;
+				break;
+			}
+			fRubyOpen = false;
+
 			BeginLine();
 
 			//	**中型 (MSZ) は「横に潰す」ではなく「半角形を使う」指定。**
@@ -284,7 +388,14 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 				}
 				fRunHalfwidth = fHalf;
 				Flush();
+				//	**ルビを括る位置を覚えておく。**属性の制御文字は
+				//	この外に出るので、字だけを囲める
+				const size_t Begin = Cur.Text.size();
 				Cur.Text += Escape(Group);
+				if (it.D >= 0 && it.C > it.D) {
+					const CharBox Box = { Begin, Cur.Text.size(), it.D, it.C };
+					Boxes.push_back(Box);
+				}
 			}
 			fRunHalfwidth = false;
 
@@ -296,6 +407,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		case AribItemType::LineBreak:
 			//	放送はまず送って来ないが、来たら行を切る
+			ApplyRuby();
 			if (!Cur.Text.empty()) {
 				const int Left = Cur.Left;
 				Lines.push_back(Cur);
@@ -336,8 +448,11 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 
 		case AribItemType::Drcs: {
 			NewLine();
+			//	外字はルビには使われない。本文の 1 字として扱う
+			fRubyOpen = false;
 			BeginLine();
 			Flush();
+			const size_t DrcsBegin = Cur.Text.size();
 			if (Options.DrcsFont.empty() || pDrcsCodes == nullptr) {
 				Cur.Text += Options.DrcsFallback;
 				break;
@@ -362,6 +477,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			Cur.Text += L">";
 			Cur.Text += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
 			Cur.Text += L"<@>";			// 元の書体に戻す
+			if (it.D >= 0 && it.C > it.D) {
+				const CharBox Box = { DrcsBegin, Cur.Text.size(), it.D, it.C };
+				Boxes.push_back(Box);
+			}
 			if (it.C > Cur.Right)
 				Cur.Right = it.C;
 			fAnyText = true;
@@ -375,6 +494,8 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			PendingY = it.B;
 			PendingPitch = it.C;
 			PendingPitchX = it.D;
+			//	**位置が変わればルビのまとまりも変わる**
+			fRubyOpen = false;
 			break;
 
 		case AribItemType::Ornament:
@@ -390,6 +511,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		}
 	}
 
+	ApplyRuby();
 	if (!Cur.Text.empty())
 		Lines.push_back(Cur);
 

@@ -672,6 +672,87 @@ void RunConvertTests()
 			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕>A B");
 	}
 
+	//	3q. **ルビ。**小型 (SSZ) で本文の 1 行上に、まとまりごとに
+	//	   位置を打って書かれる。X の重なりで本文のどの字に掛かるかを決める。
+	//	   実測の並び (『呪術廻戦』第 3 期):
+	//	     SSZ / ACPS 230,449 / あいぞう / ACPS 390,449 / うずま
+	//	     ACPS 170,509 / NSZ / ♬ 愛憎愛憎渦巻いて
+	{
+		std::vector<AribItem> Items;
+		AribItem g; g.Type = AribItemType::Geometry; g.A = 36; g.B = 540;
+		Items.push_back(g);
+
+		//	ルビ (小型)
+		AribItem ssz; ssz.Type = AribItemType::Size; ssz.A = 5; ssz.B = 5;
+		Items.push_back(ssz);
+		AribItem rp; rp.Type = AribItemType::Position;
+		rp.A = 230; rp.B = 449; rp.C = 30; rp.D = 20;
+		Items.push_back(rp);
+		const wchar_t *Ruby = L"あいぞう";
+		for (int n = 0; n < 4; n++) {
+			AribItem t; t.Type = AribItemType::Text;
+			t.Text = std::wstring(1, Ruby[n]);
+			t.D = 230 + n * 20; t.C = t.D + 20;
+			Items.push_back(t);
+		}
+
+		//	本文 (標準)。1 行下
+		AribItem bp; bp.Type = AribItemType::Position;
+		bp.A = 230; bp.B = 509; bp.C = 60; bp.D = 40;
+		Items.push_back(bp);
+		AribItem nsz; nsz.Type = AribItemType::Size; nsz.A = 10; nsz.B = 10;
+		Items.push_back(nsz);
+		const wchar_t *Body = L"愛憎渦巻";
+		for (int n = 0; n < 4; n++) {
+			AribItem t; t.Type = AribItemType::Text;
+			t.Text = std::wstring(1, Body[n]);
+			t.D = 230 + n * 40; t.C = t.D + 40;
+			Items.push_back(t);
+		}
+
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("ruby becomes a furigana block",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕></>愛憎<!>あいぞう</>渦巻");
+
+		//	**切ると従来どおり本文に混ぜる。**aviutl2.txt に
+		//	「制御文字との組み合わせによっては正しく描画出来ない」とある為
+		o2.UseRuby = false;
+		Drcs.clear();
+		check("ruby can be turned off",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕><s><s*0.5>あいぞう<s>愛憎渦巻");
+	}
+
+	//	3r. **1 文字のルビを落とさない。**ルビ 20 ドットは字幅 40 の
+	//	   ちょうど半分しか重ならない。「半分より大きい」にすると消える
+	//	   (実測: 「然(さ)らばまた」のルビ「さ」)
+	{
+		std::vector<AribItem> Items;
+		AribItem ssz; ssz.Type = AribItemType::Size; ssz.A = 5; ssz.B = 5;
+		Items.push_back(ssz);
+		AribItem rt; rt.Type = AribItemType::Text; rt.Text = L"さ";
+		rt.D = 200; rt.C = 220;
+		Items.push_back(rt);
+		AribItem nsz; nsz.Type = AribItemType::Size; nsz.A = 10; nsz.B = 10;
+		Items.push_back(nsz);
+		AribItem bt; bt.Type = AribItemType::Text; bt.Text = L"然";
+		bt.D = 200; bt.C = 240;
+		Items.push_back(bt);
+		AribItem bt2; bt2.Type = AribItemType::Text; bt2.Text = L"ら";
+		bt2.D = 240; bt2.C = 280;
+		Items.push_back(bt2);
+
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("a one-character ruby is kept",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕></>然<!>さ</>ら");
+	}
+
 	//	3f. **位置**。ACPS は行の下端を指すので 1 行分引いて上端にする
 	{
 		std::vector<AribItem> Items;
@@ -845,18 +926,22 @@ void RunConvertTests()
 		AribItem p; p.Type = AribItemType::Position; p.A = 200; p.B = 449; p.C = 60;
 		AribItem sz; sz.Type = AribItemType::Size; sz.A = 5; sz.B = 5;	// 小型 = ルビ
 		AribItem r; r.Type = AribItemType::Text; r.Text = L"る";
+		r.D = 200; r.C = 220;			// 小型は送り 20
 		AribItem p2 = p; p2.B = 509;
 		AribItem n; n.Type = AribItemType::Size; n.A = 10; n.B = 10;
 		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		t.D = 200; t.C = 240;
 		Items.push_back(p); Items.push_back(sz); Items.push_back(r);
 		Items.push_back(p2); Items.push_back(n); Items.push_back(t);
 		AribToAviUtl2Options o2 = opt;
 		o2.UseBroadcastColor = false;
 		std::vector<int> Drcs;
-		//	小型は縦横とも半分。相対指定の基準が仕様に無いので
-		//	一度 <s> で戻してから掛ける
+		//	**1 行に収まる事。**ルビで行が割れると
+		//	「ルビ / 本文」が毎回別のオブジェクトになってしまう
+		AribCaptionLayout L;
+		const std::wstring s = AribItemsToAviUtl2(Items, o2, &Drcs, &L);
 		check("a ruby line does not become a line break",
-			  AribItemsToAviUtl2(Items, o2, &Drcs) == L"<$字幕><s><s*0.5>る<s>あ");
+			  L.Lines.size() == 1 && s == L"<$字幕></>あ<!>る</>");
 	}
 
 	//	4. 外字。1 文字だけフォントを切り替え、本文の書体は保つ
@@ -1065,12 +1150,21 @@ int main(int argc, char **argv)
 		Decoded++;
 
 		int PrevY = -1, Pen = -1;
+		int ScaleH = 10, ScaleV = 10;
 		for (const AribItem &it : Items) {
 			if (it.Type == AribItemType::Drcs) DrcsRefs++;
 			if (it.Type == AribItemType::Color) Colors++;
 			if (it.Type == AribItemType::LineBreak) LineBreaks++;
-			//	小型 (SSZ) = ルビ。どれだけ来るかを見る
-			if (it.Type == AribItemType::Size && it.A == 5 && it.B == 5)
+			//	**小型 (SSZ) で書かれた文字 = ルビ。**
+			//	大きさの指定そのものを数えてはいけない。位置指定の前に
+			//	SSZ を置いてすぐ MSZ に戻す放送があり (実測)、
+			//	それを数えると**文字が 1 つも無いのにルビ有りになる**
+			if (it.Type == AribItemType::Size) {
+				ScaleH = it.A;
+				ScaleV = it.B;
+			}
+			if ((it.Type == AribItemType::Text || it.Type == AribItemType::Drcs)
+					&& ScaleH == 5 && ScaleV == 5)
 				Rubies++;
 			if (it.Type == AribItemType::Ornament && it.A == 1) {
 				Ornaments++;

@@ -582,10 +582,31 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					i++;
 				break;
 
-			case 0x91:	// FLC (1)
-			case 0x93:	// POL (1)
-			case 0x94:	// WMM (1)
-			case 0x95:	// MACRO (1)
+			case 0x91:	// FLC (1) : 点滅
+			case 0x93:	// POL (1) : パターン極性
+			case 0x94:	// WMM (1) : 書込みモード
+				//	見た目だけの指定。位置も文字数も変わらないので
+				//	引数を読み飛ばすだけにしている
+				i++;
+				break;
+
+			case 0x95: {	// MACRO : マクロ定義
+				//	**引数 1 つでは足りない。**マクロの定義は
+				//	0x4F までの並びを抱えている。1 バイトだけ食べると
+				//	**定義の中身が本文に混ざる**。
+				//	caption.dll (TVCaptionMod2 が使っている物) も
+				//	0x4F まで読み飛ばしている:
+				//	  do { dwCount++; } while (pbSrc[dwCount] != 0x4F);
+				//	libaribcaption は「ARIB TR-B14 では使わない」として
+				//	その字幕文ごと捨てる。実測の 33 番組でも 0 件。
+				//	**見つからない時は 1 バイトだけ食べて先へ進む**
+				//	(壊れたデータで残り全部を飲み込まない為)
+				size_t k = i;
+				while (k < Size && pData[k] != 0x4F)
+					k++;
+				i = (k < Size) ? k + 1 : i + 1;
+				break;
+			}
 			case 0x97:	// HLC (1) : 囲み
 				//	P1 の下位 4 ビットがどの辺を囲むか
 				//	(caption.dll も m_bHLC = P1 & 0x0F としている)。

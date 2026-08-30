@@ -532,6 +532,31 @@ void RunUnitTests()
 		check("a half-row move does not split the line", L.Lines.size() == 1);
 	}
 
+	//	5b10. **MACRO (0x95) は 0x4F まで抱えている。**
+	//	   引数 1 つとして食べると**定義の中身が本文に混ざる**。
+	//	   caption.dll も 0x4F まで読み飛ばしている
+	{
+		//	MACRO の定義 (中身は「あ」に見えるバイト) のあとに「い」
+		const BYTE d[] = {
+			0x95, 0x40, 0x24, 0x22, 0x4F,	// マクロ定義 (0x4F で終わる)
+			0x24, 0x24,						// い
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("a macro definition is skipped up to 0x4F",
+			  AribItemsToPlainText(Items) == L"い");
+	}
+
+	//	5b11. **0x4F が見つからない時は 1 バイトだけ食べる。**
+	//	   壊れたデータで残り全部を飲み込まない為
+	{
+		const BYTE d[] = { 0x95, 0x40, 0x24, 0x22 };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		check("a broken macro does not swallow the rest",
+			  AribItemsToPlainText(Items) == L"あ");
+	}
+
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
 	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
 	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、

@@ -87,6 +87,11 @@ public:
 	//	0 なら古い TSMemory.tvtp と組み合わせている
 	int GetStreamGlyphCount() const { return m_StreamGlyphs; }
 
+	//	**外字が化ける時の切り分け用。**
+	//	どの符号の字形をどこから拾ったかを 1 行にまとめた物。
+	//	`[Caption] Debug=1` の時にログへ出す
+	LPCWSTR GetGlyphReport() const { return m_GlyphReport.c_str(); }
+
 	LPCWSTR GetLastError() const { return m_szError; }
 
 private:
@@ -96,5 +101,6 @@ private:
 	int m_MissingGlyphs = 0;
 	int m_CachedGlyphs = 0;
 	int m_StreamGlyphs = 0;
+	std::wstring m_GlyphReport;
 	WCHAR m_szError[128] = {};
 };

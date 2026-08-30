@@ -526,6 +526,14 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				L"(テキストオブジェクトの「標準描画」に X/Y がありません)");
 	}
 
+	//	**外字が化ける時はここを見る。**どの符号をどこから拾ったかが判る
+	if (g_State.CaptionDebug && Source.GetGlyphReport()[0] != L' ') {
+		WCHAR szg[512];
+		::StringCchPrintfW(szg, ARRAYSIZE(szg), L"TSMemory: 外字の内訳 : %s",
+						   Source.GetGlyphReport());
+		Log(szg);
+	}
+
 	if (Source.GetStreamGlyphCount() > 0) {
 		//	TVTest 側が字幕だけを長く溜めた分から拾えた数。
 		//	古い TSMemory.tvtp と組み合わせていると 0 になる

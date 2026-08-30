@@ -3,9 +3,13 @@
 //----------------------------------------------------------------------------
 #include <windows.h>
 
+#define STRSAFE_NO_DEPRECATE
+#include <strsafe.h>
+
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <vector>
 
 #include "ts_caption.h"
@@ -270,6 +274,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	m_MissingGlyphs = 0;
 	m_CachedGlyphs = 0;
 	m_StreamGlyphs = 0;
+	m_GlyphReport.clear();
 	m_szError[0] = L'\0';
 
 	std::vector<BYTE> Ts;
@@ -467,6 +472,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	//	**本文は取らない。**こちらは古いパケットも含むので、
 	//	字幕文まで拾うと重複したり時刻が合わなくなる。
 	//	先に流して後から本編で上書きさせ、新しい字形を優先する
+	std::set<int> StreamCodes;		// 蓄積から拾えた符号 (切り分け用)
 	{
 		std::vector<BYTE> Extra;
 		char szExtra[MAX_PATH];
@@ -476,6 +482,8 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			Scan(Extra);
 			fGlyphsOnly = false;
 			m_StreamGlyphs = static_cast<int>(Glyphs.size());
+			for (const auto &e : Glyphs)
+				StreamCodes.insert(e.first);
 		}
 	}
 
@@ -496,6 +504,24 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			g_GlyphCache[GlyphKey(pids.Service, CaptionPid, e.first)] = c;
 		}
 	}
+
+	//	**どの符号をどこから拾ったかを残す。**
+	//	外字が化けた時、原因が「窓に入らなかった」のか
+	//	「そもそも定義が流れていない」のかをログで切り分ける為
+	{
+		WCHAR sz[128];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"サービス %04X / 字幕 PID %04X / 蓄積 %d 字形 / "
+						   L"キャッシュ %d 件 :",
+						   pids.Service, CaptionPid, m_StreamGlyphs,
+						   static_cast<int>(g_GlyphCache.size()));
+		m_GlyphReport = sz;
+	}
+	auto Report = [&](int Code, LPCWSTR pszFrom) {
+		WCHAR sz[64];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz), L" %04X=%s", Code, pszFrom);
+		m_GlyphReport += sz;
+	};
 
 	//	--- 外字のフォントを組み立てる ---------------------------------------
 	//	割り当てた順 (DrcsCodes) と同じ並びで字形を並べる
@@ -518,12 +544,17 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 						List.push_back(g);
 						m_CachedGlyphs++;
 						fCached = true;
+						Report(DrcsCodes[i], L"キャッシュ");
 					}
 				}
-				if (!fCached)
+				if (!fCached) {
 					m_MissingGlyphs++;
+					Report(DrcsCodes[i], L"無し");
+				}
 				continue;
 			}
+			Report(DrcsCodes[i],
+				   StreamCodes.count(DrcsCodes[i]) ? L"蓄積" : L"本編");
 			TSMemoryDrcsGlyph g = it->second;
 			g.Code = static_cast<wchar_t>(Options.DrcsFirstCode + i);
 			List.push_back(g);

@@ -1045,6 +1045,7 @@ int main(int argc, char **argv)
 	//	送って来ないなら、行の区切りは ACPS の座標からしか起こせない。
 	//	「2 行の字幕は TS の上でも 2 行なのか」を切り分ける為に数える
 	int LineBreaks = 0;
+	int Rubies = 0;
 	//	**同じ高さで横に離れた位置に書き直した回数。**
 	//	複数の話者を同時に別の場所へ出す字幕で起こる。
 	//	行の区切りを Y だけで見ていると 1 行に繋がってしまう
@@ -1068,6 +1069,9 @@ int main(int argc, char **argv)
 			if (it.Type == AribItemType::Drcs) DrcsRefs++;
 			if (it.Type == AribItemType::Color) Colors++;
 			if (it.Type == AribItemType::LineBreak) LineBreaks++;
+			//	小型 (SSZ) = ルビ。どれだけ来るかを見る
+			if (it.Type == AribItemType::Size && it.A == 5 && it.B == 5)
+				Rubies++;
 			if (it.Type == AribItemType::Ornament && it.A == 1) {
 				Ornaments++;
 				OrnColors[it.B]++;
@@ -1123,9 +1127,9 @@ int main(int argc, char **argv)
 	}
 
 	std::printf("decoded %d units : 本文あり %d / 文字数 %zu\n", Decoded, WithText, TotalChars);
-	std::printf("  制御 : 位置 %d / 改行 %d / 色 %d / 外字 %d"
+	std::printf("  制御 : 位置 %d / 改行 %d / 色 %d / 外字 %d / ルビ(小型) %d"
 				" / 同じ高さで横に飛んだ %d\n",
-				Positions, LineBreaks, Colors, DrcsRefs, SideBySide);
+				Positions, LineBreaks, Colors, DrcsRefs, Rubies, SideBySide);
 	std::printf("  行 : 合計 %d / うち同じ高さで割れた %d\n",
 				TotalLines, SplitSameRow);
 	std::printf("  縁取り (ORN) : %d 件", Ornaments);

@@ -1449,11 +1449,35 @@ int main(int argc, char **argv)
 		Flush(e.first);
 
 	int Body = 0, Drcs = 0;
+	//	定義された外字の符号 (**本文と同じ形に直した値**)
+	std::map<int, int> DrcsDefined;
 	for (const CaptionUnit &u : Units) {
 		if (u.Parameter == 0x20) Body++;
-		if (u.Parameter == 0x30 || u.Parameter == 0x31) Drcs++;
+		if (u.Parameter == 0x30 || u.Parameter == 0x31) {
+			Drcs++;
+			//	**定義側の符号を本文側と同じ形に直して数える。**
+			//	1 バイト外字 (0x30) の character_code は
+			//	「上位 = 集合 / 下位 = 集合の中の符号」なので、
+			//	そのまま 2 バイトで持つと本文の 0x21 と結び付かない。
+			//	ここが合っているかを実データで見る
+			if (u.Body.size() >= 4) {
+				const int Raw = (u.Body[1] << 8) | u.Body[2];
+				const int Code = (u.Parameter == 0x30)
+								 ? (Raw & 0x7F)
+								 : ((Raw >= 0xEC00 && Raw <= 0xF8FF)
+									? Raw : (Raw & 0x7F7F));
+				DrcsDefined[Code]++;
+			}
+		}
 	}
-	std::printf("data units : 本文 %d / DRCS %d (合計 %zu)\n\n", Body, Drcs, Units.size());
+	std::printf("data units : 本文 %d / DRCS %d (合計 %zu)\n", Body, Drcs, Units.size());
+	if (!DrcsDefined.empty()) {
+		std::printf("  定義された外字の符号 :");
+		for (const auto &e : DrcsDefined)
+			std::printf(" 0x%04X(%d件)", e.first, e.second);
+		std::printf("\n");
+	}
+	std::printf("\n");
 
 	//	**本文が無い時こそ生バイトが要る。**復号に失敗しているのか
 	//	本当に画面消去だけなのかは、これを見ないと切り分けられない

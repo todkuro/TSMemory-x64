@@ -397,7 +397,22 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 					size_t k = 1;
 					const int Count = pUnit[0];
 					for (int n = 0; n < Count && k + 3 <= Len; n++) {
-						const int Code = (pUnit[k] << 8) | pUnit[k + 1];
+						//	**定義の符号は本文の符号と形が違う。**
+						//	定義側は 2 バイトの character_code で、
+						//	1 バイト外字 (パラメータ 0x30) の場合は
+						//	  上位 … どの外字集合か
+						//	  下位 … 集合の中の符号 (本文で使う値)
+						//	になっている。そのまま 2 バイトを鍵にすると
+						//	**本文の 0x21 と定義の 0x0121 が結び付かず、
+						//	字形を受け取っていても必ず「無し」になる**
+						//	(実機で 《 》 が出なかった原因)。
+						//	libaribcaption も 1 バイトは下位 7 ビット、
+						//	2 バイトは 0x7F7F でマスクしている
+						const int Raw = (pUnit[k] << 8) | pUnit[k + 1];
+						const int Code = (Param == 0x30)
+										 ? (Raw & 0x7F)
+										 : ((Raw >= 0xEC00 && Raw <= 0xF8FF)
+											? Raw : (Raw & 0x7F7F));
 						k += 2;
 						const int Fonts = pUnit[k++];
 						for (int f = 0; f < Fonts && k < Len; f++) {

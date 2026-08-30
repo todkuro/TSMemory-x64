@@ -309,6 +309,26 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 				//	本文の無い物 (画面消去だけ等) は Lines が空になる
 				const double Seconds = (Pts >= 0 && VideoStart >= 0)
 									   ? PtsDiffSeconds(VideoStart, Pts) : -1.0;
+
+				//	**ここで前の字幕が消える。**放送は
+				//	  ・画面消去 (CS) だけのデータユニット
+				//	  ・次の字幕 (書く前に画面を消す)
+				//	の形で「消す時刻」を送って来る。拾わないと
+				//	次の字幕が来るまで出しっぱなしになる
+				//	(実測: 17 組中 1 組、最大 2.4 秒長く出ていた)。
+				//
+				//	**本文が空でも CS が無ければ消さない。**属性を
+				//	変えただけのデータユニットで消えてしまう為
+				bool fClear = false;
+				for (const AribItem &it : Items)
+					fClear = fClear || (it.Type == AribItemType::ClearScreen);
+				if (Seconds >= 0.0 && (fClear || !Layout.Lines.empty())) {
+					for (TSMemoryCaption &Prev : m_Captions) {
+						if (Prev.EndSeconds < 0.0 && Prev.Seconds < Seconds)
+							Prev.EndSeconds = Seconds;
+					}
+				}
+
 				for (const AribCaptionLine &Line : Layout.Lines) {
 					TSMemoryCaption c;
 					c.Text = Line.Text;

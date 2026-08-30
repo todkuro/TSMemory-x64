@@ -363,7 +363,11 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 		if (Start > Video.end)
 			continue;
 
-		//	次の字幕までを表示の長さにする。最後の 1 つは映像の末尾まで
+		//	**消える時刻が判っていればそれを使う。**放送は画面消去で
+		//	「ここで消す」と送って来る。判らない時だけ次の字幕までで
+		//	代用する (多くの局は消去を次の字幕と同じ時刻に送るので
+		//	差は出ないが、間が空く番組では長く出たままになる)。
+		//	最後の 1 つでどちらも無ければ映像の末尾まで
 		int End = Video.end;
 		for (int k = i + 1; k < Source.GetCount(); k++) {
 			if (Source.Get(k).Seconds > c.Seconds) {
@@ -371,6 +375,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 					+ static_cast<int>(Source.Get(k).Seconds * Rate + 0.5) - 1;
 				break;
 			}
+		}
+		if (c.EndSeconds > c.Seconds) {
+			const int Erase = Video.start
+				+ static_cast<int>(c.EndSeconds * Rate + 0.5) - 1;
+			if (Erase < End)
+				End = Erase;
 		}
 		if (End > Video.end)
 			End = Video.end;

@@ -334,6 +334,25 @@ void RunUnitTests()
 		check("text after ACPS is kept", AribItemsToPlainText(Items) == L"あ");
 	}
 
+	//	5b2. **画面消去 (CS = 0x0C)。**放送はこれで「ここで消す」と送る。
+	//	   拾えないと次の字幕が来るまで出しっぱなしになる
+	//	   (実測: 17 件中 1 件、最大 2.4 秒長く出ていた)
+	{
+		const BYTE d[] = { 0x0C };
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		bool fClear = false;
+		for (const AribItem &it : Items)
+			fClear = fClear || (it.Type == AribItemType::ClearScreen);
+		check("CS is reported as a clear-screen", fClear);
+		//	本文が無いので行にはならない。**この組み合わせが「消す」の印**
+		AribToAviUtl2Options o2;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("a clear-only unit produces no line", L.Lines.empty());
+	}
+
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
 	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
 	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、
@@ -1114,13 +1133,20 @@ int main(int argc, char **argv)
 		std::printf(" / 色 %d が %d 件", e.first, e.second);
 	std::printf("\n");
 
-	//	**「消す」ユニットを使えば表示の長さが判る。**
-	//	今は次の字幕が来るまで出しっぱなしにしているので、
-	//	その差がどれだけあるかを測る
+	//	**表示の長さは「消す」ユニットから決まる。**
+	//	`CTSCaptionSource` と同じ規則をここでもなぞって、
+	//	消える時刻をいくつ拾えるか / 「次の字幕まで」で代用した場合と
+	//	どれだけ違うかを出す。
+	//
+	//	規則 : 画面消去 (CS) を含むか本文のあるデータユニットが来たら、
+	//	       それまでに出ていた字幕はそこで消える
 	{
+		struct Shown { double Start; double End; double Next; };
+		std::vector<Shown> Live;
 		double SumShown = 0.0, SumNext = 0.0;
-		int Pairs = 0, Late = 0;
+		int Closed = 0, Open = 0, Late = 0;
 		double Worst = 0.0;
+
 		for (size_t i = 0; i < Units.size(); i++) {
 			if (Units[i].Parameter != 0x20 || Units[i].Pts < 0)
 				continue;
@@ -1130,44 +1156,57 @@ int main(int argc, char **argv)
 			std::vector<int> Codes;
 			AribCaptionLayout L;
 			AribItemsToAviUtl2(Items, o, &Codes, &L);
-			if (L.Lines.empty())
-				continue;		// 消すだけのユニット
 
-			//	次のユニット = 消す時刻 / 次に本文が来るユニット
-			double Erase = -1.0, Next = -1.0;
-			for (size_t k = i + 1; k < Units.size(); k++) {
-				if (Units[k].Parameter != 0x20 || Units[k].Pts < 0)
-					continue;
-				const double dt = (Units[k].Pts - Units[i].Pts) / 90000.0;
-				if (dt <= 0.0)
-					continue;
-				if (Erase < 0.0)
-					Erase = dt;
-				std::vector<AribItem> It2;
-				AribDecodeText(Units[k].Body.data(), Units[k].Body.size(), &It2);
-				AribCaptionLayout L2;
-				std::vector<int> C2;
-				AribItemsToAviUtl2(It2, o, &C2, &L2);
-				if (!L2.Lines.empty()) {
-					Next = dt;
-					break;
+			bool fClear = false;
+			for (const AribItem &it : Items)
+				fClear = fClear || (it.Type == AribItemType::ClearScreen);
+
+			const double t = Units[i].Pts / 90000.0;
+
+			//	**ここで前の字幕が消える。**
+			//	本文が空でも CS が無ければ消さない (属性だけの指定)
+			if (fClear || !L.Lines.empty()) {
+				for (Shown &s : Live) {
+					if (s.End < 0.0 && s.Start < t)
+						s.End = t;
 				}
 			}
-			if (Erase < 0.0 || Next < 0.0)
-				continue;
-			SumShown += Erase;
-			SumNext += Next;
-			if (Next - Erase > Worst)
-				Worst = Next - Erase;
-			if (Next - Erase > 0.5)
-				Late++;
-			Pairs++;
+			//	「次の字幕まで」で代用した場合の終わり
+			if (!L.Lines.empty()) {
+				for (Shown &s : Live) {
+					if (s.Next < 0.0 && s.Start < t)
+						s.Next = t;
+				}
+				Shown s = { t, -1.0, -1.0 };
+				Live.push_back(s);
+			}
 		}
-		if (Pairs > 0) {
-			std::printf("  表示の長さ : 放送 平均 %.1f 秒 / "
-						"次の字幕まで 平均 %.1f 秒 "
-						"(%d 組中 %d 組が 0.5 秒以上長い、最大 %.1f 秒)\n",
-						SumShown / Pairs, SumNext / Pairs, Pairs, Late, Worst);
+
+		for (const Shown &s : Live) {
+			if (s.End < 0.0) { Open++; continue; }
+			Closed++;
+			const double Shownf = s.End - s.Start;
+			const double Nextf = (s.Next > s.Start) ? s.Next - s.Start : Shownf;
+			SumShown += Shownf;
+			SumNext += Nextf;
+			if (Nextf - Shownf > Worst)
+				Worst = Nextf - Shownf;
+			if (Nextf - Shownf > 0.5)
+				Late++;
+		}
+		//	**大半の字幕で消える時刻が拾えている事。**
+		//	CS の判定が壊れると Closed が 0 に落ちて、
+		//	字幕が次の字幕まで出しっぱなしに戻る
+		if (!Live.empty())
+			check("most captions have an explicit erase time", Closed >= Open);
+
+		if (Closed > 0) {
+			std::printf("  表示の長さ : %d 件で消える時刻が判った "
+						"(判らず次の字幕まで %d 件)\n"
+						"    放送 平均 %.1f 秒 / 次の字幕まで 平均 %.1f 秒 "
+						"(%d 件中 %d 件が 0.5 秒以上長い、最大 %.1f 秒)\n",
+						Closed, Open, SumShown / Closed, SumNext / Closed,
+						Closed, Late, Worst);
 		}
 	}
 	std::printf("\n");

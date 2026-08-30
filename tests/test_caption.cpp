@@ -978,6 +978,30 @@ void RunConvertTests()
 			  == L"<$字幕></>然<!>さ</>ら");
 	}
 
+	//	3s. **MDF (CSI ... 0x20 'd') = 太字 / 斜体。**
+	//	   `<@+B>` で足して `<@-B>` で外す。
+	//	   **下線 (STL/SPL) と囲み (HLC) は AviUtl2 に制御文字が無い**
+	//	   ので復号だけして出力には使わない
+	{
+		std::vector<AribItem> Items;
+		AribItem b; b.Type = AribItemType::Decoration; b.A = 1;	// 太字
+		AribItem t; t.Type = AribItemType::Text; t.Text = L"あ";
+		AribItem n; n.Type = AribItemType::Decoration; n.A = 0;	// 標準
+		AribItem t2; t2.Type = AribItemType::Text; t2.Text = L"い";
+		AribItem u; u.Type = AribItemType::Decoration; u.A = 4;	// 下線
+		AribItem t3; t3.Type = AribItemType::Text; t3.Text = L"う";
+		Items.push_back(b); Items.push_back(t);
+		Items.push_back(n); Items.push_back(t2);
+		Items.push_back(u); Items.push_back(t3);
+
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("MDF becomes a font style, underline is dropped",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕><@+B>あ<@-B>いう");
+	}
+
 	//	3f. **位置**。ACPS は行の下端を指すので 1 行分引いて上端にする
 	{
 		std::vector<AribItem> Items;

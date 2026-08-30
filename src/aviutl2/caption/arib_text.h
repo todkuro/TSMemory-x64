@@ -35,6 +35,17 @@ enum class AribItemType {
 	//	**放送が実際に送って来る。**TVCaptionMod2 は縁の太さだけを
 	//	これで切り替えており、色は見ていない (「着色対応は省略」)
 	Ornament,
+	//	文字修飾。A はビットの組み合わせ
+	//	  1 = 太字 / 2 = 斜体 (MDF)
+	//	  4 = 下線 (STL / SPL)
+	//	  8 = 囲み (HLC)
+	//
+	//	**AviUtl2 のテキストに下線と囲みは無い。**
+	//	`aviutl2.txt` の文字スタイルは B (太字) / I (斜体) /
+	//	S (取り消し線) だけで、下線も囲みも制御文字が無い。
+	//	復号はするが出力には使えない (caption.dll も下線を太字で
+	//	代用しており、そのまま出す術は無い)
+	Decoration,
 	Position,		// A = X, B = Y (字幕平面のドット。APS も ACPS もここに来る)
 	ClearScreen,	// 画面消去 (CS)
 	LineBreak,		// 改行 (APD / APR)

@@ -120,6 +120,13 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 	int ScaleH = 10, EmittedH = 10;
 	int ScaleV = 10, EmittedV = 10;
 
+	//	文字修飾のビット (1=太字 / 2=斜体 / 4=下線 / 8=囲み)。
+	//
+	//	**出せるのは太字と斜体だけ。**`aviutl2.txt` の文字スタイルは
+	//	B (太字) / I (斜体) / S (取り消し線) しか無く、下線も囲みも
+	//	制御文字が無い。放送でも一度も来ていない (33 番組)
+	int Deco = 0, EmittedDeco = 0;
+
 	//	放送の文字の大きさ (AviUtl2 のサイズに直した値)。0 ならプリセット任せ
 	int BaseSize = 0;
 	bool fSizeEmitted = false;
@@ -254,6 +261,7 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			//	標準の行の先頭に無駄な <s> が付く
 			EmittedColor = -1;
 			EmittedBack = -1;
+			EmittedDeco = 0;
 			EmittedH = 10;
 			EmittedV = 10;
 			fSizeEmitted = false;
@@ -294,6 +302,20 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			EmittedColor = Color;
 			EmittedBack = Back;
 		}
+		//	**太字と斜体はスタイルの足し引きで出す。**
+		//	`<@+B>` で足して `<@-B>` で外す (aviutl2.txt
+		//	「フォントスタイルの変更」)。下線と囲みは制御文字が無いので
+		//	出せない
+		if ((Deco & 3) != (EmittedDeco & 3)) {
+			const int Add = Deco & ~EmittedDeco;
+			const int Del = EmittedDeco & ~Deco;
+			if (Add & 1) Cur.Text += L"<@+B>";
+			if (Add & 2) Cur.Text += L"<@+I>";
+			if (Del & 1) Cur.Text += L"<@-B>";
+			if (Del & 2) Cur.Text += L"<@-I>";
+			EmittedDeco = Deco;
+		}
+
 		//	**半角に差し替えられた文字には横倍率を掛けない。**
 		//	字形がもともと半分の幅なので、更に潰すと歪む
 		//	(libaribcaption の needless_horizontal_scaling と同じ判断)
@@ -494,7 +516,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			Cur.Text += Options.DrcsFont;
 			Cur.Text += L">";
 			Cur.Text += static_cast<wchar_t>(Options.DrcsFirstCode + Index);
+			//	**<@> は書体を戻すので、スタイルも出し直す。**
+			//	戻さない実装だったとしても、足し直すだけなので害は無い
 			Cur.Text += L"<@>";			// 元の書体に戻す
+			EmittedDeco = 0;
 			if (it.D >= 0 && it.C > it.D) {
 				const CharBox Box = { DrcsBegin, Cur.Text.size(), it.D, it.C };
 				Boxes.push_back(Box);
@@ -514,6 +539,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			PendingPitchX = it.D;
 			//	**位置が変わればルビのまとまりも変わる**
 			fRubyOpen = false;
+			break;
+
+		case AribItemType::Decoration:
+			Deco = it.A;
 			break;
 
 		case AribItemType::Ornament:

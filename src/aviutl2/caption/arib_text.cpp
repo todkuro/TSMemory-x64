@@ -141,6 +141,9 @@ struct State {
 	int ScaleH = 10;
 	int ScaleV = 10;
 
+	//	文字修飾のビット (1=太字 / 2=斜体 / 4=下線 / 8=囲み)
+	int Deco = 0;
+
 	//	RPC で指定された「次の文字を繰り返す回数」。-1 なら指定なし、
 	//	0 なら行末まで。**1 文字書くと使い切る**
 	int Repeat = -1;
@@ -246,6 +249,13 @@ size_t ParseCsi(const BYTE *p, size_t Size, size_t i,
 			pSt->PenY += (Final == 0x5B ? 1 : -1) * pSt->PitchY() / 2;
 			PushSimple(pOut, AribItemType::Position, pSt->PenX, pSt->PenY,
 					   pSt->PitchY(), pSt->PitchX());
+		}
+		break;
+	case 0x64:		// MDF : 文字のフォント (太字 / 斜体)
+		//	P1 = 0 標準 / 1 太字 / 2 斜体 / 3 太字 + 斜体
+		if (Count >= 1 && Param[0] >= 0 && Param[0] <= 3) {
+			pSt->Deco = (pSt->Deco & ~3) | Param[0];
+			PushSimple(pOut, AribItemType::Decoration, pSt->Deco);
 		}
 		break;
 	case 0x61:		// ACPS : 表示位置 (ドット)
@@ -576,7 +586,15 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			case 0x93:	// POL (1)
 			case 0x94:	// WMM (1)
 			case 0x95:	// MACRO (1)
-			case 0x97:	// HLC (1)。**囲み。消費しないと引数が本文に混ざる**
+			case 0x97:	// HLC (1) : 囲み
+				//	P1 の下位 4 ビットがどの辺を囲むか
+				//	(caption.dll も m_bHLC = P1 & 0x0F としている)。
+				//	**AviUtl2 のテキストに囲みは無い**ので出力には
+				//	使えないが、状態としては持っておく
+				if (i < Size) {
+					st.Deco = (pData[i] & 0x0F) ? (st.Deco | 8) : (st.Deco & ~8);
+					PushSimple(pOut, AribItemType::Decoration, st.Deco);
+				}
 				i++;
 				break;
 
@@ -592,7 +610,12 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 				i++;
 				break;
 
-			case 0x99: case 0x9A:				// SPL / STL (引数なし)
+			case 0x99:	// SPL : 下線の終了
+			case 0x9A:	// STL : 下線の開始
+				//	**AviUtl2 のテキストに下線は無い。**
+				//	復号はするが出力には使えない
+				st.Deco = (b == 0x9A) ? (st.Deco | 4) : (st.Deco & ~4);
+				PushSimple(pOut, AribItemType::Decoration, st.Deco);
 				break;
 			case 0x9B:	i = ParseCsi(pData, Size, i, &st, pOut); break;	// CSI
 			case 0x9D:	i += 2; break;			// TIME (2)

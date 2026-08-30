@@ -526,6 +526,15 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				L"(テキストオブジェクトの「標準描画」に X/Y がありません)");
 	}
 
+	if (Source.GetStreamGlyphCount() > 0) {
+		//	TVTest 側が字幕だけを長く溜めた分から拾えた数。
+		//	古い TSMemory.tvtp と組み合わせていると 0 になる
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 外字 %d 字形を字幕の蓄積から拾いました",
+						   Source.GetStreamGlyphCount());
+		Log(sz);
+	}
+
 	if (Source.GetCachedGlyphCount() > 0) {
 		//	**符号の意味は番組ごとに変わる。**同じチャンネルでも
 		//	番組をまたぐと取り違え得るので、使った事を伝える

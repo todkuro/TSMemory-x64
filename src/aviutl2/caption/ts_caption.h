@@ -84,6 +84,10 @@ public:
 	//	使い回せる
 	int GetCachedGlyphCount() const { return m_CachedGlyphs; }
 
+	//	字幕だけの共有メモリ (TVTest 側が長く溜めている物) から拾えた字形の数。
+	//	0 なら古い TSMemory.tvtp と組み合わせている
+	int GetStreamGlyphCount() const { return m_StreamGlyphs; }
+
 	LPCWSTR GetLastError() const { return m_szError; }
 
 private:
@@ -92,5 +96,6 @@ private:
 	size_t m_GlyphCount = 0;
 	int m_MissingGlyphs = 0;
 	int m_CachedGlyphs = 0;
+	int m_StreamGlyphs = 0;
 	WCHAR m_szError[128] = {};
 };

@@ -257,6 +257,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	m_GlyphCount = 0;
 	m_MissingGlyphs = 0;
 	m_CachedGlyphs = 0;
+	m_StreamGlyphs = 0;
 	m_szError[0] = L'\0';
 
 	std::vector<BYTE> Ts;
@@ -279,6 +280,8 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	std::map<WORD, Pending> Bufs;
 	std::vector<int> DrcsCodes;
 	std::map<int, TSMemoryDrcsGlyph> Glyphs;		// 符号 -> 字形
+	//	真の間は字形の定義だけを拾い、字幕文は捨てる
+	bool fGlyphsOnly = false;
 
 	auto Handle = [&](const std::vector<BYTE> &Pes) {
 		if (Pes.size() < 9 || Pes[0] || Pes[1] || Pes[2] != 0x01)
@@ -330,7 +333,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			if (q + 5 + Len > End) return;
 			const BYTE *pUnit = body + q + 5;
 
-			if (Param == 0x20) {			// 本文
+			if (Param == 0x20 && !fGlyphsOnly) {	// 本文
 				std::vector<AribItem> Items;
 				AribDecodeText(pUnit, Len, &Items);
 				AribCaptionLayout Layout;
@@ -408,36 +411,64 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 		}
 	};
 
-	for (size_t i = 0; i + TS_PACKET_SIZE <= Ts.size(); i += TS_PACKET_SIZE) {
-		const BYTE *p = &Ts[i];
-		if (p[0] != 0x47 || (p[3] & 0x10) == 0)
-			continue;
-		const WORD Pid = static_cast<WORD>(((p[1] & 0x1F) << 8) | p[2]);
-		bool fTarget = false;
-		for (WORD x : pids.Caption)
-			fTarget = fTarget || (x == Pid);
-		if (!fTarget)
-			continue;
+	auto Scan = [&](const std::vector<BYTE> &Data) {
+		Bufs.clear();
+		for (size_t i = 0; i + TS_PACKET_SIZE <= Data.size(); i += TS_PACKET_SIZE) {
+			const BYTE *p = &Data[i];
+			if (p[0] != 0x47 || (p[3] & 0x10) == 0)
+				continue;
+			const WORD Pid = static_cast<WORD>(((p[1] & 0x1F) << 8) | p[2]);
+			bool fTarget = false;
+			for (WORD x : pids.Caption)
+				fTarget = fTarget || (x == Pid);
+			if (!fTarget)
+				continue;
 
-		size_t o = 4;
-		if (p[3] & 0x20)
-			o += 1 + p[4];
-		if (o >= TS_PACKET_SIZE)
-			continue;
+			size_t o = 4;
+			if (p[3] & 0x20)
+				o += 1 + p[4];
+			if (o >= TS_PACKET_SIZE)
+				continue;
 
-		if (p[1] & 0x40) {
-			auto it = Bufs.find(Pid);
-			if (it != Bufs.end() && !it->second.Pes.empty())
-				Handle(it->second.Pes);
-			Bufs[Pid].Pes.assign(p + o, p + TS_PACKET_SIZE);
-		} else if (Bufs.count(Pid)) {
-			Bufs[Pid].Pes.insert(Bufs[Pid].Pes.end(), p + o, p + TS_PACKET_SIZE);
+			if (p[1] & 0x40) {
+				auto it = Bufs.find(Pid);
+				if (it != Bufs.end() && !it->second.Pes.empty())
+					Handle(it->second.Pes);
+				Bufs[Pid].Pes.assign(p + o, p + TS_PACKET_SIZE);
+			} else if (Bufs.count(Pid)) {
+				Bufs[Pid].Pes.insert(Bufs[Pid].Pes.end(),
+									 p + o, p + TS_PACKET_SIZE);
+			}
+		}
+		for (auto &e : Bufs) {
+			if (!e.second.Pes.empty())
+				Handle(e.second.Pes);
+		}
+	};
+
+	//	**先に字幕だけの共有メモリから字形を拾う。**
+	//	TVTest 側は字幕のパケットを別に長く溜めている
+	//	(字幕は取り込む量の 0.01〜0.02% しか無いので安く持てる)。
+	//	AviUtl2 側が見えるのは取り込んだ瞬間の窓 (8〜14 秒) だけなので、
+	//	**字形の定義 (再送間隔は中央値 14.2 秒、最大 210 秒) は
+	//	そちらでないと揃わない**。
+	//
+	//	**本文は取らない。**こちらは古いパケットも含むので、
+	//	字幕文まで拾うと重複したり時刻が合わなくなる。
+	//	先に流して後から本編で上書きさせ、新しい字形を優先する
+	{
+		std::vector<BYTE> Extra;
+		char szExtra[MAX_PATH];
+		std::snprintf(szExtra, sizeof(szExtra), "%s.caption", pszSharedName);
+		if (ReadSharedMemory(szExtra, &Extra)) {
+			fGlyphsOnly = true;
+			Scan(Extra);
+			fGlyphsOnly = false;
+			m_StreamGlyphs = static_cast<int>(Glyphs.size());
 		}
 	}
-	for (auto &e : Bufs) {
-		if (!e.second.Pes.empty())
-			Handle(e.second.Pes);
-	}
+
+	Scan(Ts);
 
 	//	--- 受け取った字形を覚えておく ---------------------------------------
 	const WORD CaptionPid = pids.Caption.empty() ? 0 : pids.Caption[0];

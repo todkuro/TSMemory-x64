@@ -557,6 +557,44 @@ void RunUnitTests()
 			  AribItemsToPlainText(Items) == L"あ");
 	}
 
+	//	5b12. **行送りは「文字を書く時」の大きさで決まる。**
+	//	   放送は位置を打ってから大きさを指定して来る (実測):
+	//	     CSI "250;389" SP 'a' / 88 (小型) / ゆうた
+	//	     CSI "170;449" SP 'a' / 8A (標準) / 乙骨憂太
+	//	   位置指定の時点の大きさで決めると、1 行目が小型の送り 30 で
+	//	   計算され、**次の行と半行ぶん重なる** (実機で発生)
+	{
+		const BYTE d[] = {
+			0x9B, 0x33, 0x36, 0x3B, 0x33, 0x36, 0x20, 0x57,	// SSM 36;36
+			0x9B, 0x32, 0x34, 0x20, 0x59,					// SVS 24
+			0x9B, 0x31, 0x37, 0x30, 0x3B, 0x34, 0x34, 0x39, 0x20, 0x61,
+			0x88,											// SSZ (位置の後)
+			0x24, 0x22,										// あ
+		};
+		std::vector<AribItem> Items;
+		AribDecodeText(d, sizeof(d), &Items);
+		int Pitch = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position)
+				Pitch = it.C;
+		}
+		//	小型なので (36+24)/2 = 30 に入れ直される
+		check("a size after the position retunes the row pitch", Pitch == 30);
+
+		//	標準に戻したら 60 に戻る
+		std::vector<BYTE> e(d, d + sizeof(d) - 2);
+		e.push_back(0x8A);								// NSZ
+		e.push_back(0x24); e.push_back(0x22);
+		Items.clear();
+		AribDecodeText(e.data(), e.size(), &Items);
+		Pitch = -1;
+		for (const AribItem &it : Items) {
+			if (it.Type == AribItemType::Position)
+				Pitch = it.C;
+		}
+		check("the pitch follows the last size before the text", Pitch == 60);
+	}
+
 	//	5c. **ORN (CSI ... 0x20 'c') = 文字外縁 (縁取り)。**
 	//	   放送が実際に送って来る (実測: 8 本中 2 本で 12 件、全て黒)。
 	//	   **色は 1 つの数に詰められている。**P2 = 色配列 * 100 + 色番号 で、
@@ -1402,10 +1440,18 @@ int main(int argc, char **argv)
 			//	画面消去だけの 1 バイトの物は見ても仕方がない
 			if (u.Body.size() <= 4 && Units.size() > 6)
 				continue;
+			//	**検索文字列があれば、それを含む物だけ出す。**
+			//	先頭 6 件しか出さないので、追いたい字幕に届かない
+			if (g_pszFind != nullptr) {
+				std::vector<AribItem> It;
+				AribDecodeText(u.Body.data(), u.Body.size(), &It);
+				if (AribItemsToPlainText(It).find(g_pszFind) == std::wstring::npos)
+					continue;
+			}
 			if (++n > 6)
 				break;
 			std::printf("  [param %02X / %zu bytes]", u.Parameter, u.Body.size());
-			for (size_t i = 0; i < u.Body.size() && i < 160; i++)
+			for (size_t i = 0; i < u.Body.size() && i < 400; i++)
 				std::printf(" %02X", u.Body[i]);
 			std::printf("\n");
 		}

@@ -372,6 +372,29 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 	//	読まないと 1 行に繋がったまま画面をはみ出す
 	//	(実測: 平面 960 幅に対して右端が 1230 になっていた)。
 	//	文字を書く直前に呼ぶ事
+	//	**行送りは「文字を書く時」の大きさで決まる。**
+	//	放送は位置を打ってから大きさを指定して来る (実測):
+	//
+	//	  CSI "170;449" SP 'a'   1 行目の位置 (この時まだ小型のまま)
+	//	  8A                     NSZ (標準)
+	//	  乙 骨 憂 太
+	//
+	//	位置指定の時点の大きさで行送りを決めると、ルビ (小型) の後の
+	//	行が半行ぶんしか下がらず、**次の行と重なる** (実機で発生)。
+	//	大きさが変わったら、まだ文字を書いていない位置指定を入れ直す
+	auto RetunePosition = [&]() {
+		for (size_t n = pOut->size(); n-- > 0; ) {
+			const AribItemType t = (*pOut)[n].Type;
+			if (t == AribItemType::Text || t == AribItemType::Drcs)
+				break;			// もう文字を書いている
+			if (t == AribItemType::Position) {
+				(*pOut)[n].C = st.PitchY();
+				(*pOut)[n].D = st.PitchX();
+				break;
+			}
+		}
+	};
+
 	//	ペンを桁・行の単位で動かす。fHome なら桁を表示領域の左端へ戻す。
 	//	座標が判っていない間は改行として伝えるしかない
 	auto MovePen = [&](int Cols, int Rows, bool fHome) {
@@ -548,11 +571,14 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 			switch (b) {
 			//	SSZ 小型 = 縦横半分 / MSZ 中型 = 横だけ半分 / NSZ 標準
 			case 0x88:	st.ScaleH = 5;  st.ScaleV = 5;
-						PushSimple(pOut, AribItemType::Size, 5, 5); break;
+						PushSimple(pOut, AribItemType::Size, 5, 5);
+						RetunePosition(); break;
 			case 0x89:	st.ScaleH = 5;  st.ScaleV = 10;
-						PushSimple(pOut, AribItemType::Size, 5, 10); break;
+						PushSimple(pOut, AribItemType::Size, 5, 10);
+						RetunePosition(); break;
 			case 0x8A:	st.ScaleH = 10; st.ScaleV = 10;
-						PushSimple(pOut, AribItemType::Size, 10, 10); break;
+						PushSimple(pOut, AribItemType::Size, 10, 10);
+						RetunePosition(); break;
 			case 0x8B:	// SZX (1)
 				//	**0x41 は「縦だけ 2 倍」。**縦横 2 倍は 0x45。
 				//	0x41 を縦横 2 倍にすると横に伸び過ぎる。
@@ -565,6 +591,7 @@ void DecodeBody(const BYTE *pData, size_t Size, State &st,
 					default:   break;
 					}
 					PushSimple(pOut, AribItemType::Size, st.ScaleH, st.ScaleV);
+					RetunePosition();
 				}
 				i++;
 				break;

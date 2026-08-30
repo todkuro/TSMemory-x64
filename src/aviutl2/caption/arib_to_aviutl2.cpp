@@ -144,6 +144,13 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 		int Right = 0;
 		std::wstring Text;
 	};
+	//	**ルビは「次に始まる行」の物。**2 行の字幕では
+	//	  1 行目の位置 / 1 行目の本文
+	//	  ルビの位置 (1 行目と 2 行目の間) / ルビ
+	//	  2 行目の位置 / 2 行目の本文
+	//	の順で来る。受け取った時点の行に付けると**2 行目のルビが
+	//	1 行目に乗る** (実機で発生)。行が始まるまで預かっておく
+	std::vector<RubyRun> Pending;
 	std::vector<RubyRun> Rubies;
 	bool fRubyOpen = false;		// 直前の文字と同じまとまりか
 
@@ -344,21 +351,28 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			//	そのまま出すと本文の頭にふりがなだけが並ぶ
 			if (Options.UseRuby && ScaleH == 5 && ScaleV == 5 && it.D >= 0) {
 				//	X が続いている間は同じまとまり
-				if (!fRubyOpen || Rubies.empty()
-						|| Rubies.back().Right != it.D) {
+				if (!fRubyOpen || Pending.empty()
+						|| Pending.back().Right != it.D) {
 					RubyRun r;
 					r.Left = it.D;
 					r.Right = it.C;
 					r.Text = it.Text;
-					Rubies.push_back(r);
+					Pending.push_back(r);
 				} else {
-					Rubies.back().Text += it.Text;
-					Rubies.back().Right = it.C;
+					Pending.back().Text += it.Text;
+					Pending.back().Right = it.C;
 				}
 				fRubyOpen = true;
 				break;
 			}
 			fRubyOpen = false;
+
+			//	**行の最初の字が来た所で、預かっていたルビを引き取る。**
+			//	ここより前に付けると 1 行上の行に乗ってしまう
+			if (Boxes.empty() && !Pending.empty()) {
+				Rubies.insert(Rubies.end(), Pending.begin(), Pending.end());
+				Pending.clear();
+			}
 
 			BeginLine();
 
@@ -450,6 +464,10 @@ std::wstring AribItemsToAviUtl2(const std::vector<AribItem> &Items,
 			NewLine();
 			//	外字はルビには使われない。本文の 1 字として扱う
 			fRubyOpen = false;
+			if (Boxes.empty() && !Pending.empty()) {
+				Rubies.insert(Rubies.end(), Pending.begin(), Pending.end());
+				Pending.clear();
+			}
 			BeginLine();
 			Flush();
 			const size_t DrcsBegin = Cur.Text.size();

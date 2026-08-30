@@ -726,6 +726,52 @@ void RunConvertTests()
 			  == L"<$字幕><s><s*0.5>あいぞう<s>愛憎渦巻");
 	}
 
+	//	3q2. **2 行の字幕で、2 行目のルビが 1 行目に乗らない事。**
+	//	   放送は
+	//	     1 行目の位置 / 1 行目の本文
+	//	     ルビの位置 (1 行目と 2 行目の間) / ルビ
+	//	     2 行目の位置 / 2 行目の本文
+	//	   の順で送る。受け取った時点の行に付けると 1 行目に乗る (実機で発生)
+	{
+		std::vector<AribItem> Items;
+		AribItem nsz; nsz.Type = AribItemType::Size; nsz.A = 10; nsz.B = 10;
+		AribItem ssz; ssz.Type = AribItemType::Size; ssz.A = 5; ssz.B = 5;
+
+		//	1 行目 (y=449)
+		AribItem p1; p1.Type = AribItemType::Position;
+		p1.A = 200; p1.B = 449; p1.C = 60; p1.D = 40;
+		Items.push_back(nsz); Items.push_back(p1);
+		AribItem a; a.Type = AribItemType::Text; a.Text = L"上";
+		a.D = 200; a.C = 240;
+		Items.push_back(a);
+
+		//	ルビ (1 行目と 2 行目の間、y=479)。**2 行目の「下」に掛かる**
+		AribItem rp; rp.Type = AribItemType::Position;
+		rp.A = 200; rp.B = 479; rp.C = 30; rp.D = 20;
+		Items.push_back(ssz); Items.push_back(rp);
+		AribItem r; r.Type = AribItemType::Text; r.Text = L"し";
+		r.D = 200; r.C = 220;
+		Items.push_back(r);
+
+		//	2 行目 (y=509)
+		AribItem p2; p2.Type = AribItemType::Position;
+		p2.A = 200; p2.B = 509; p2.C = 60; p2.D = 40;
+		Items.push_back(nsz); Items.push_back(p2);
+		AribItem b; b.Type = AribItemType::Text; b.Text = L"下";
+		b.D = 200; b.C = 240;
+		Items.push_back(b);
+
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		AribCaptionLayout L;
+		AribItemsToAviUtl2(Items, o2, &Drcs, &L);
+		check("ruby goes to the line below it, not the one above",
+			  L.Lines.size() == 2
+			  && L.Lines[0].Text == L"<$字幕>上"
+			  && L.Lines[1].Text == L"<$字幕></>下<!>し</>");
+	}
+
 	//	3r. **1 文字のルビを落とさない。**ルビ 20 ドットは字幅 40 の
 	//	   ちょうど半分しか重ならない。「半分より大きい」にすると消える
 	//	   (実測: 「然(さ)らばまた」のルビ「さ」)
@@ -1131,6 +1177,9 @@ int main(int argc, char **argv)
 	//	「2 行の字幕は TS の上でも 2 行なのか」を切り分ける為に数える
 	int LineBreaks = 0;
 	int Rubies = 0;
+	//	**外字の符号。**二重かっこ等が化ける件の切り分け用。
+	//	字形が届かないと代替文字になるので、どの符号が来ているかを見る
+	std::map<int, int> DrcsCodes;
 	//	**同じ高さで横に離れた位置に書き直した回数。**
 	//	複数の話者を同時に別の場所へ出す字幕で起こる。
 	//	行の区切りを Y だけで見ていると 1 行に繋がってしまう
@@ -1152,7 +1201,10 @@ int main(int argc, char **argv)
 		int PrevY = -1, Pen = -1;
 		int ScaleH = 10, ScaleV = 10;
 		for (const AribItem &it : Items) {
-			if (it.Type == AribItemType::Drcs) DrcsRefs++;
+			if (it.Type == AribItemType::Drcs) {
+				DrcsRefs++;
+				DrcsCodes[it.A]++;
+			}
 			if (it.Type == AribItemType::Color) Colors++;
 			if (it.Type == AribItemType::LineBreak) LineBreaks++;
 			//	**小型 (SSZ) で書かれた文字 = ルビ。**
@@ -1226,6 +1278,15 @@ int main(int argc, char **argv)
 				Positions, LineBreaks, Colors, DrcsRefs, Rubies, SideBySide);
 	std::printf("  行 : 合計 %d / うち同じ高さで割れた %d\n",
 				TotalLines, SplitSameRow);
+	if (!DrcsCodes.empty()) {
+		std::printf("  外字の符号 :");
+		int n = 0;
+		for (const auto &e : DrcsCodes) {
+			if (++n > 8) { std::printf(" ..."); break; }
+			std::printf(" 0x%04X(%d件)", e.first, e.second);
+		}
+		std::printf("\n");
+	}
 	std::printf("  縁取り (ORN) : %d 件", Ornaments);
 	for (const auto &e : OrnColors)
 		std::printf(" / 色 %d が %d 件", e.first, e.second);

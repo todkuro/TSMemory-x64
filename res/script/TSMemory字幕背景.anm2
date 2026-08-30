@@ -3,6 +3,7 @@
 --track@pady:縦余白,0,200,4,1
 --track@alpha:不透明度,0,100,50,1
 --track@orn:縁取り,0,20,2,1,なし
+--check@ornfit:縁を文字に合わせる,1
 --color@bgcol:背景色,0x000000
 --color@orncol:縁色,0x000000
 --check@dbg:デバッグ表示,0
@@ -60,9 +61,21 @@
 local ornw, ornh = obj.w, obj.h
 local ornox, ornoy = obj.ox, obj.oy
 local ornok, ornerr = true, nil
-if orn > 0 then
+
+--	**文字の大きさに合わせる。**TVCaptionMod2 の縁は文字の高さに
+--	対する相対 (StrokeWidth=-2)。こちらは絶対のドット数なので、
+--	そのままだと文字を大きくしても縁が太くならない。
+--	基準は「1080p で放送どおりの大きさ (<s72>) の 1 行」= obj.h 88
+--	(実機のログで 216x88 と出ていた値)。0 にはしない
+local ornsize = orn
+if ornfit == 1 and orn > 0 and ornh > 0 then
+	ornsize = math.floor(orn * ornh / 88 + 0.5)
+	if ornsize < 1 then ornsize = 1 end
+end
+
+if ornsize > 0 then
 	ornok, ornerr = pcall(function()
-		obj.effect("縁取り", "サイズ", orn, "縁色", orncol)
+		obj.effect("縁取り", "サイズ", ornsize, "縁色", orncol)
 	end)
 end
 
@@ -84,7 +97,7 @@ local h = obj.h
 
 if dbg == 1 and orn > 0 then
 	print("TSMemory字幕背景: 縁取り " .. (ornok and "成功" or "失敗")
-		  .. " size=" .. orn
+		  .. " size=" .. orn .. "->" .. ornsize
 		  .. " " .. ornw .. "x" .. ornh .. " -> " .. w .. "x" .. h
 		  .. " ox " .. ornox .. " -> " .. obj.ox
 		  .. " oy " .. ornoy .. " -> " .. obj.oy

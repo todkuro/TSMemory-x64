@@ -1049,7 +1049,7 @@ void RunConvertTests()
 		//	中央が指定した座標に来た
 		check("the line keeps its right edge for the centre",
 			  L.Lines[0].Right == 200 + 40
-			  && L.Lines[0].CenterX() == 200 + 20);
+			  && L.Lines[0].Right == 200 + 40);
 	}
 
 	//	3i. **3 行以上**。実放送に 3 行の字幕が在る (実測)。
@@ -1658,13 +1658,13 @@ int main(int argc, char **argv)
 		if (k < Layouts.size()) {
 			//	1920x1080 に置いた時の左上 (画面中央が原点)
 			for (const AribCaptionLine &Line : Layouts[k].Lines) {
-				//	**X には行の左端を入れる。**
-				//	AviUtl2 のテキストは X が行の中央を指すが、
-				//	描画後の幅ぶんはスクリプト側でずらして左揃えにする
+				//	**基準点は行の左上。**テキストオブジェクトの
+				//	文字揃え「左寄せ[上]」がそのままの意味だった
+				//	(実機で TVCaptionMod2 と並べて確認済み)
 				const int X = Line.Left * 1920 / Layouts[k].PlaneWidth - 960;
 				const int Y = Line.Top * 1080 / Layouts[k].PlaneHeight - 540;
-				std::printf("  (左%3d 右%3d 中央%3d 上%3d dots -> 1080p X=%d Y=%d)\n",
-							Line.Left, Line.Right, Line.CenterX(), Line.Top, X, Y);
+				std::printf("  (左%3d 右%3d 上%3d dots -> 1080p X=%d Y=%d)\n",
+							Line.Left, Line.Right, Line.Top, X, Y);
 			}
 		}
 		std::printf("  [%s]\n", u8.data());

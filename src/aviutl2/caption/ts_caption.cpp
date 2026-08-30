@@ -380,7 +380,6 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 					TSMemoryCaption c;
 					c.Text = Line.Text;
 					c.Left = Line.Left;
-					c.CenterX = Line.CenterX();
 					c.Top = Line.Top;
 					c.PlaneWidth = Layout.PlaneWidth;
 					c.PlaneHeight = Layout.PlaneHeight;

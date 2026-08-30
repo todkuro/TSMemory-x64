@@ -447,8 +447,8 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				WCHAR szp[192];
 				::StringCchPrintfW(szp, ARRAYSIZE(szp),
 								   L"TSMemory: 1 件目の位置 : 字幕平面 "
-								   L"左%d 中央%d 上%d / %dx%d -> X=%d Y=%d",
-								   c.Left, c.CenterX, c.Top,
+								   L"左%d 上%d / %dx%d -> X=%d Y=%d",
+								   c.Left, c.Top,
 								   c.PlaneWidth, c.PlaneHeight, X, Y);
 				Log(szp);
 				if (g_State.CaptionDebug)

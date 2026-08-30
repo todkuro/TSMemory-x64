@@ -44,7 +44,6 @@ struct TSMemoryCaption {
 	//	字幕平面の中での位置 (ドット)。負なら判らなかった
 	int Left = -1;
 	int Top = -1;
-	int CenterX = -1;		// **AviUtl2 のテキストは X が行の中央**
 	int PlaneWidth = 960;
 	int PlaneHeight = 540;
 

@@ -247,6 +247,16 @@ void LogAudioResult(const CTvtvAudio &Audio)
 			L"確認してください (両方を 1 にする必要があります)");
 		break;
 
+	case CTvtvAudio::Result::UnsupportedFormat:
+		//	設定は正しい。形式が違うだけなので、設定を疑わせない
+		::StringCchPrintfW(szMessage, ARRAYSIZE(szMessage),
+						   L"TSMemory: 音声はありますが対応していない形式です "
+						   L"(stream_type 0x%02X)。"
+						   L"対応しているのは AAC (ADTS, stream_type 0x0F) だけです",
+						   Audio.GetUnsupportedAudioType());
+		TSMemoryLogWarn(szMessage);
+		break;
+
 	default:
 		::StringCchPrintfW(szMessage, ARRAYSIZE(szMessage),
 						   L"TSMemory: 音声を取り込めませんでした : %s",

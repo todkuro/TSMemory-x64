@@ -66,7 +66,14 @@ public:
 	//	開始サンプル位置からフレーム番号を引く (見つからなければ -1)
 	int FindFrameBySample(int64_t Sample) const;
 
+	//	PMT に在ったが復号出来なかった音声の stream_type (無ければ 0)。
+	//	  0x11 … MPEG-4 AAC (LATM)   0x1C … MPEG-4 raw audio
+	//	いずれも新 4K8K 衛星放送で使われる。ADTS 専用の索引作りでは
+	//	見つけられない。「音声が無い」と取り違えない為に持つ
+	BYTE GetUnsupportedAudioType() const { return m_UnsupportedAudioType; }
+
 private:
+	BYTE m_UnsupportedAudioType = 0;
 	std::vector<BYTE> m_Es;			// 音声 ES (ADTS の連なり)
 	std::vector<TSAudioFrame> m_Frames;
 

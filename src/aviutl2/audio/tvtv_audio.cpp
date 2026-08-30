@@ -63,8 +63,20 @@ bool CTvtvAudio::Open(const char *pszPath)
 
 	CTSAudioSource Source;
 	if (!Source.Open(pszName)) {
-		m_Result = Result::NoStream;
-		::lstrcpynW(m_szError, L"音声のストリームが見つかりません", 128);
+		//	「音声が無い」のか「形式が違って読めない」のかを区別する。
+		//	取り違えると案内が嘘になる (設定を疑わせてしまう)
+		const BYTE Unsupported = Source.GetUnsupportedAudioType();
+		if (Unsupported != 0) {
+			m_Result = Result::UnsupportedFormat;
+			m_UnsupportedAudioType = Unsupported;
+			::lstrcpynW(m_szError,
+						Unsupported == 0x11
+							? L"MPEG-4 AAC (LATM) には対応していません"
+							: L"この音声の形式には対応していません", 128);
+		} else {
+			m_Result = Result::NoStream;
+			::lstrcpynW(m_szError, L"音声のストリームが見つかりません", 128);
+		}
 		return false;
 	}
 

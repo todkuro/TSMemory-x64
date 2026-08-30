@@ -381,6 +381,8 @@ int CTSAudioSource::FindFrameBySample(int64_t Sample) const
 
 bool CTSAudioSource::Open(const char *pszSharedName)
 {
+	m_UnsupportedAudioType = 0;
+
 	std::vector<BYTE> Ts;
 	if (!ReadSharedMemory(pszSharedName, &Ts))
 		return false;
@@ -431,7 +433,13 @@ bool CTSAudioSource::Open(const char *pszSharedName)
 					const size_t EsLength = ((s[k + 3] & 0x0F) << 8) | s[k + 4];
 
 					if (StreamType == 0x0F && AudioPid == 0)
-						AudioPid = Pid;			// AAC
+						AudioPid = Pid;			// AAC (ADTS)
+					//	復号出来ない音声も、在った事だけは覚えておく。
+					//	「音声が無い」と「形式が違って読めない」を
+					//	取り違えると、案内が嘘になる
+					if ((StreamType == 0x11 || StreamType == 0x1C)
+							&& m_UnsupportedAudioType == 0)
+						m_UnsupportedAudioType = StreamType;
 					if ((StreamType == 0x02 || StreamType == 0x01) && VideoPid == 0)
 						VideoPid = Pid;			// MPEG-1/2 Video
 

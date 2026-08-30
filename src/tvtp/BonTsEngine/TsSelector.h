@@ -26,6 +26,16 @@ public:
 		STREAM_DATACARROUSEL	= 0x00000008UL,
 		STREAM_AAC				= 0x00000010UL,
 		STREAM_H264				= 0x00000020UL,
+		//	H.265/HEVC (stream_type 0x24)。
+		//	本リポジトリでの追加。BonTsEngine は本家 TVTest から
+		//	2017-09-30 に削除されており上流に戻す先が無い為、
+		//	ここで直接足している (docs/development.md を参照)。
+		//	値は TsSelector.cpp の StreamTypeList[] の並び順に対応する
+		STREAM_H265				= 0x00000040UL,
+		//	新 4K8K 衛星放送の音声。地上波/BS の AAC (0x0F, ADTS) とは
+		//	同期層が違う (LATM/LOAS)。これも本リポジトリでの追加
+		STREAM_AAC_LATM			= 0x00000080UL,	// stream_type 0x11
+		STREAM_MPEG4_AUDIO		= 0x00000100UL,	// stream_type 0x1C
 		STREAM_ALL				= 0xFFFFFFFFUL
 	};
 	bool SetTargetServiceID(WORD ServiceID=0, DWORD Stream=STREAM_ALL);

@@ -91,6 +91,15 @@ int wmain(int argc, wchar_t **argv)
 
 	std::vector<BYTE> Font;
 	check("the font was built", TSMemoryBuildDrcsFont(Glyphs, L"TSMemoryDRCS", &Font));
+
+	//	**既定のフォント名には空白が入っている** ([Caption] DrcsFont の
+	//	既定は "TSMemory DRCS")。name テーブルに入って引ける事を確かめる
+	{
+		std::vector<BYTE> F2;
+		check("a family name with a space builds",
+			  TSMemoryBuildDrcsFont(Glyphs, L"TSMemory DRCS", &F2)
+			  && F2.size() > 0);
+	}
 	std::printf("  font size = %zu bytes / %zu glyphs\n", Font.size(), Glyphs.size());
 	check("the font is not empty", Font.size() > 1024);
 	check("the sfnt version is 1.0",

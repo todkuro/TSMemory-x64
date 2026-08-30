@@ -523,6 +523,11 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 		m_GlyphReport += sz;
 	};
 
+	//	字形が無かった外字の添字。**代替文字に置き換える為に要る。**
+	//	変換はフォントを組み立てる前に済んでいるので、その時点では
+	//	字形が揃うかどうかが判らない
+	std::set<size_t> MissingIndex;
+
 	//	--- 外字のフォントを組み立てる ---------------------------------------
 	//	割り当てた順 (DrcsCodes) と同じ並びで字形を並べる
 	if (!DrcsCodes.empty() && !Options.DrcsFont.empty()) {
@@ -549,6 +554,7 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 				}
 				if (!fCached) {
 					m_MissingGlyphs++;
+					MissingIndex.insert(i);
 					Report(DrcsCodes[i], L"無し");
 				}
 				continue;
@@ -562,6 +568,28 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 		if (!List.empty()) {
 			m_GlyphCount = List.size();
 			TSMemoryBuildDrcsFont(List, Options.DrcsFont.c_str(), &m_Font);
+		}
+
+		//	**字形の無い外字は代替文字に差し替える。**
+		//	変換はフォントを組み立てる前に済んでいるので、字形が無くても
+		//	`<@外字フォント>` + 私用領域の文字が出てしまっている。
+		//	そのままだとフォントに字が無く、**豆腐 (□) になる**
+		//	(実機で `《` `》` が □ になっていた)。
+		//	組み立てた後に判るので、ここで置き換える
+		if (!MissingIndex.empty()) {
+			const std::wstring Prefix = L"<@" + Options.DrcsFont + L">";
+			for (size_t i : MissingIndex) {
+				std::wstring From = Prefix;
+				From += static_cast<wchar_t>(Options.DrcsFirstCode + i);
+				From += L"<@>";
+				for (TSMemoryCaption &c : m_Captions) {
+					for (size_t p = c.Text.find(From); p != std::wstring::npos;
+							p = c.Text.find(From, p)) {
+						c.Text.replace(p, From.size(), Options.DrcsFallback);
+						p += Options.DrcsFallback.size();
+					}
+				}
+			}
 		}
 	}
 

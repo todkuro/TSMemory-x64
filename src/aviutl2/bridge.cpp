@@ -532,6 +532,15 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				L"(テキストオブジェクトの「標準描画」に X/Y がありません)");
 	}
 
+	//	**フォントの一覧に載っているかを取り込み時に確かめる。**
+	//	初期化の中では 0 件しか返らない (実測) ので、ここで見る。
+	//	ProgramDataviutl2\Font に置いた外字フォントが
+	//	本体から見えているかの切り分け用
+	if (g_State.CaptionDebug) {
+		TSMemoryVerifyFont(g_State.CaptionDrcsFont.c_str());
+		TSMemoryVerifyFont(L"TSMemoryDRCS");
+	}
+
 	//	**外字が化ける時はここを見る。**どの符号をどこから拾ったかが判る
 	if (g_State.CaptionDebug && Source.GetGlyphReport()[0] != L'\0') {
 		WCHAR szg[512];

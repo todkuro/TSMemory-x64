@@ -644,7 +644,112 @@ TVTest から取り込んで AviUtl2 のタイムラインに音声が乗り、
 > 音声 PID の分だけリングバッファを食う (同じ `MemorySize` なら
 > 遡れる時間が短くなる) 為です。
 
-### 10. 終了時のクラッシュ (アンロード後の参照)
+### 10. 4K8K の形式 (取り込みのみ / H.264・HEVC・LATM 音声)
+
+**復号には対応していません。**AviUtl2 側の m2v は MPEG-2 専用で、PMT でも
+`0x01/0x02/0x03/0x04/0x0f/0x10` しか見ておらず、H.264 (`0x1B`) や
+HEVC (`0x24`) は映像として認識すらしません。
+
+その上で、**TVTest 側では落とさずに残す**ようにしてあります。
+
+```c
+DWORD Streams = CTsSelector::STREAM_MPEG2VIDEO
+              | CTsSelector::STREAM_H264
+              | CTsSelector::STREAM_H265;
+```
+
+理由は単純で、**ここで捨てると後段で何をしても取り返せない**からです。
+残しておけば、復号手段を用意した時にそのまま使えます。MPEG-2 の放送では
+該当する PID が無いので、何も変わりません。
+
+`STREAM_H265` / `STREAM_AAC_LATM` / `STREAM_MPEG4_AUDIO` と
+`StreamTypeList[]` の `0x24` / `0x11` / `0x1C` は本リポジトリでの追加です。
+BonTsEngine は本家から 2017-09-30 に削除されており上流に戻す先が無い為、
+`src/tvtp/BonTsEngine/` を直接編集しています
+(「BonTsEngine と LibISDB」を参照)。
+
+音声も同じ考えで、4K8K で使われる形式を落とさないようにしてあります。
+
+```c
+if (m_fAudio) {
+    Streams |= CTsSelector::STREAM_AAC          // 0x0F  ADTS (地上波/BS)
+            |  CTsSelector::STREAM_AAC_LATM     // 0x11  MPEG-4 AAC (LATM)
+            |  CTsSelector::STREAM_MPEG4_AUDIO; // 0x1C  MPEG-4 raw audio
+}
+```
+
+**復号出来るのは `0x0F` (ADTS) だけ**です。`src/aviutl2/audio/ts_audio.cpp`
+は同期語 `0xFFF` から ADTS の連鎖を組み立てる作りで、LATM/LOAS は
+同期層が違う為 1 フレームも見つけられません。それでも通しているのは、
+やはり**捨てると取り返せない**からです。
+
+> **`StreamTypeList[]` の並び順が `STREAM_*` のビット位置**です。
+>
+> ```c
+> static const BYTE StreamTypeList[] = {
+>     0x01, 0x02, 0x06, 0x0D, 0x0F, 0x1B, 0x24, 0x11, 0x1C
+> };
+> //  bit  0     1     2     3     4     5     6     7     8
+> ```
+>
+> `bTarget = (m_TargetStream & (1 << j))` と添字で対応させている為、
+> **並びを変えると全ての指定がずれます**。追加は必ず末尾に足す事
+> (`0x24` の後ろが `0x11` `0x1C` と数値順で無いのはその為で、
+> 並べ直してはいけません)。
+> `tests/test_selector.cpp` に「ADTS だけを要求すれば LATM は落ちる」等の
+> 否定側の確認を置いてあり、ずれると失敗します。
+
+#### 復号出来ない音声を「音声が無い」と言わない
+
+`0x11` / `0x1C` を通すようにした結果、**PMT に音声が在るのに復号出来ない**
+状態が起こり得るようになりました。ここで従来の
+
+```
+音声が見つかりません。TVTest 側の TSMemory.ini で [Settings] Audio=1 に…
+```
+
+を出すと、設定は正しいのに設定を疑わせる事になります。`CTSAudioSource` が
+PMT で見つけた復号不能な `stream_type` を覚えておき、区別して出します。
+
+```
+音声はありますが対応していない形式です (stream_type 0x11)。
+対応しているのは AAC (ADTS, stream_type 0x0F) だけです
+```
+
+| `CTvtvAudio::Result` | 意味 |
+| --- | --- |
+| `NoStream` | 音声の PID が無い (TVTest 側で落としている等) |
+| `UnsupportedFormat` | 音声は在るが `0x11` / `0x1C` で復号出来ない |
+
+#### 復号する場合の選択肢
+
+| | 内容 |
+| --- | --- |
+| 自作 | Media Foundation を使う。**実測: H.264 の復号器は 1 個あるが、HEVC は 0 個** (Store の有料拡張が要る)。加えて RAP の索引・シーク・表示順の並べ替えを書く必要があり、音声対応より重い |
+| 委譲 | 実ファイルの `.ts` を書き、[L-SMASH-Works](https://github.com/Mr-Ojii/L-SMASH-Works-Auto-Builds) に開かせる。FFmpeg 内蔵で HEVC も可。ただし共有メモリではなく実ファイルの受け渡しになる |
+
+AviUtl2 の標準入力は **AVI/WAV/BMP/PNG/JPG/GIF のみ**で
+(`aviutl2.txt`)、動画を扱うには入力プラグインが要ります。TSMemory は
+既にその入力プラグイン (`.tvtv`) なので、委譲する場合は
+**渡す物を実ファイルに変える**必要があります。
+
+いずれも未着手です。
+
+#### PCR の PID は種別に関わらず残る
+
+`CTsSelector` は PCR の PID を常に残します (`TsSelector.cpp`)。
+
+```c
+|| m_PmtPIDList[i].PcrPID == PID
+```
+
+実放送は PCR を映像 PID に載せる事が多いので、**stream_type で落とした
+つもりでも映像パケットが残っている**場合があります。
+`tests/test_selector.cpp` で「MPEG-2 だけを要求すれば H.264 は落ちる」事を
+確認する際、PCR を映像と同じ PID にしていて最初は失敗しました
+(PCR として残っていた)。テストでは PCR を別 PID にしてあります。
+
+### 11. 終了時のクラッシュ (アンロード後の参照)
 
 **AviUtl2 は終了時にプラグインを `FreeLibrary` した後も、登録済みの
 ポインタを参照し続けます。**

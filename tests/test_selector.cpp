@@ -81,7 +81,7 @@ void AppendSection(std::vector<BYTE> *pTs, WORD PID, BYTE Counter,
 	pTs->insert(pTs->end(), p, p + sizeof(p));
 }
 
-std::vector<BYTE> MakePat()
+std::vector<BYTE> MakePatFor(const WORD (*Programs)[2], size_t Count)
 {
 	std::vector<BYTE> s;
 	s.push_back(0x00);					// table_id
@@ -91,8 +91,8 @@ std::vector<BYTE> MakePat()
 	s.push_back(0xC1);					// version / current_next
 	s.push_back(0x00); s.push_back(0x00);	// section_number / last
 
-	const WORD Programs[][2] = { { SERVICE_1, PMT_PID_1 }, { SERVICE_2, PMT_PID_2 } };
-	for (const auto &e : Programs) {
+	for (size_t i = 0; i < Count; i++) {
+		const WORD (&e)[2] = Programs[i];
 		s.push_back(static_cast<BYTE>(e[0] >> 8));
 		s.push_back(static_cast<BYTE>(e[0]));
 		s.push_back(0xE0 | static_cast<BYTE>(e[1] >> 8));
@@ -103,8 +103,23 @@ std::vector<BYTE> MakePat()
 	return s;
 }
 
-std::vector<BYTE> MakePmt(WORD ServiceID, WORD VideoPID, WORD AudioPID)
+std::vector<BYTE> MakePat()
 {
+	const WORD Programs[][2] = { { SERVICE_1, PMT_PID_1 }, { SERVICE_2, PMT_PID_2 } };
+	return MakePatFor(Programs, 2);
+}
+
+//	VideoStreamType で映像の種別を変えられる。
+//	  0x02 = MPEG-2 Video / 0x1B = H.264 / 0x24 = H.265 (HEVC)
+//	PcrPID に 0 を渡すと VideoPID を PCR にする (実放送はこの形が多い)。
+//	**PCR の PID は stream_type に関わらず必ず残る** (TsSelector.cpp) 為、
+//	ES の選別だけを見たい時は別の PID を指定する。
+std::vector<BYTE> MakePmt(WORD ServiceID, WORD VideoPID, WORD AudioPID,
+						  BYTE VideoStreamType = 0x02, WORD PcrPID = 0,
+						  BYTE AudioStreamType = 0x0F)
+{
+	if (PcrPID == 0)
+		PcrPID = VideoPID;
 	std::vector<BYTE> s;
 	s.push_back(0x02);					// table_id
 	s.push_back(0xB0);
@@ -113,16 +128,16 @@ std::vector<BYTE> MakePmt(WORD ServiceID, WORD VideoPID, WORD AudioPID)
 	s.push_back(static_cast<BYTE>(ServiceID));
 	s.push_back(0xC1);
 	s.push_back(0x00); s.push_back(0x00);
-	s.push_back(0xE0 | static_cast<BYTE>(VideoPID >> 8));	// PCR_PID
-	s.push_back(static_cast<BYTE>(VideoPID));
+	s.push_back(0xE0 | static_cast<BYTE>(PcrPID >> 8));		// PCR_PID
+	s.push_back(static_cast<BYTE>(PcrPID));
 	s.push_back(0xF0); s.push_back(0x00);					// program_info_length
 
-	s.push_back(0x02);					// stream_type = MPEG-2 Video
+	s.push_back(VideoStreamType);		// stream_type (映像)
 	s.push_back(0xE0 | static_cast<BYTE>(VideoPID >> 8));
 	s.push_back(static_cast<BYTE>(VideoPID));
 	s.push_back(0xF0); s.push_back(0x00);					// ES_info_length
 
-	s.push_back(0x0F);					// stream_type = AAC
+	s.push_back(AudioStreamType);		// stream_type (音声)
 	s.push_back(0xE0 | static_cast<BYTE>(AudioPID >> 8));
 	s.push_back(static_cast<BYTE>(AudioPID));
 	s.push_back(0xF0); s.push_back(0x00);					// ES_info_length
@@ -148,6 +163,40 @@ void AppendVideo(std::vector<BYTE> *pTs, WORD PID, BYTE Counter, BYTE Fill)
 	p[2] = static_cast<BYTE>(PID);
 	p[3] = 0x10 | (Counter & 0x0F);
 	pTs->insert(pTs->end(), p, p + sizeof(p));
+}
+
+//	4K8K を模した TS。映像 HEVC + 音声 LATM (0x11) / MPEG-4 raw (0x1C)。
+//	地上波/BS の AAC (0x0F, ADTS) とは同期層が違う為、AviUtl2 側では
+//	復号出来ないが、**TVTest 側で捨てると後で取り返せない**
+constexpr WORD SERVICE_4K1 = 3072, SERVICE_4K2 = 3073;
+constexpr WORD PMT_PID_4K1 = 0x0500, VIDEO_PID_4K1 = 0x0511, AUDIO_PID_4K1 = 0x0512;
+constexpr WORD PMT_PID_4K2 = 0x0600, VIDEO_PID_4K2 = 0x0611, AUDIO_PID_4K2 = 0x0612;
+constexpr WORD PCR_PID_4K1 = 0x051F, PCR_PID_4K2 = 0x061F;
+
+std::vector<BYTE> BuildUhdStream()
+{
+	std::vector<BYTE> Ts;
+	const WORD Programs[][2] = {
+		{ SERVICE_4K1, PMT_PID_4K1 }, { SERVICE_4K2, PMT_PID_4K2 },
+	};
+
+	for (BYTE round = 0; round < 4; round++) {
+		AppendSection(&Ts, 0x0000, round, MakePatFor(Programs, 2));
+		AppendSection(&Ts, PMT_PID_4K1, round,
+					  MakePmt(SERVICE_4K1, VIDEO_PID_4K1, AUDIO_PID_4K1,
+							  0x24, PCR_PID_4K1, 0x11));
+		AppendSection(&Ts, PMT_PID_4K2, round,
+					  MakePmt(SERVICE_4K2, VIDEO_PID_4K2, AUDIO_PID_4K2,
+							  0x24, PCR_PID_4K2, 0x1C));
+
+		for (BYTE i = 0; i < 8; i++) {
+			AppendVideo(&Ts, VIDEO_PID_4K1, i, 0x99);
+			AppendVideo(&Ts, AUDIO_PID_4K1, i, 0xAA);
+			AppendVideo(&Ts, VIDEO_PID_4K2, i, 0xBB);
+			AppendVideo(&Ts, AUDIO_PID_4K2, i, 0xCC);
+		}
+	}
+	return Ts;
 }
 
 //---------------------------------------------------------------------------
@@ -233,6 +282,48 @@ std::vector<BYTE> BuildStream()
 			AppendVideo(&Ts, AUDIO_PID_2, i, 0x44);
 			AppendVideo(&Ts, static_cast<WORD>(VIDEO_PID_1 + 3), i, 0x55);
 			AppendVideo(&Ts, static_cast<WORD>(VIDEO_PID_2 + 3), i, 0x66);
+		}
+	}
+	return Ts;
+}
+
+//	H.264 / H.265 の TS。
+//
+//	AviUtl2 側の m2v はこれらを復号出来ないが、**TVTest 側で捨ててしまうと
+//	後段で何をしても取り返せない**。ここで見るのは「PID が残るか」だけで、
+//	中身が復号可能である必要は無い。その為ダミーのペイロードで足りる
+//	(実際に符号化した映像を作らなくても、この確認は成立する)。
+constexpr WORD SERVICE_H264 = 2048, SERVICE_H265 = 2049;
+constexpr WORD PMT_PID_H264 = 0x0300, VIDEO_PID_H264 = 0x0311;
+constexpr WORD PMT_PID_H265 = 0x0400, VIDEO_PID_H265 = 0x0411;
+constexpr WORD AUDIO_PID_H264 = 0x0312, AUDIO_PID_H265 = 0x0412;
+//	PCR は映像とは別の PID にする。同じにすると「PCR だから残った」のか
+//	「stream_type が選ばれたから残った」のかを区別出来ない
+constexpr WORD PCR_PID_H264 = 0x031F, PCR_PID_H265 = 0x041F;
+
+std::vector<BYTE> BuildAvcHevcStream()
+{
+	std::vector<BYTE> Ts;
+
+	const WORD Programs[][2] = {
+		{ SERVICE_H264, PMT_PID_H264 },
+		{ SERVICE_H265, PMT_PID_H265 },
+	};
+
+	for (BYTE round = 0; round < 4; round++) {
+		AppendSection(&Ts, 0x0000, round, MakePatFor(Programs, 2));
+		AppendSection(&Ts, PMT_PID_H264, round,
+					  MakePmt(SERVICE_H264, VIDEO_PID_H264, AUDIO_PID_H264, 0x1B,
+							  PCR_PID_H264));
+		AppendSection(&Ts, PMT_PID_H265, round,
+					  MakePmt(SERVICE_H265, VIDEO_PID_H265, AUDIO_PID_H265, 0x24,
+							  PCR_PID_H265));
+
+		for (BYTE i = 0; i < 8; i++) {
+			AppendVideo(&Ts, VIDEO_PID_H264, i, 0x55);
+			AppendVideo(&Ts, VIDEO_PID_H265, i, 0x66);
+			AppendVideo(&Ts, AUDIO_PID_H264, i, 0x77);
+			AppendVideo(&Ts, AUDIO_PID_H265, i, 0x88);
 		}
 	}
 	return Ts;
@@ -352,6 +443,116 @@ int main()
 			Feed(&Selector, Ts);
 			check("subtitle: it is dropped when not asked",
 				  Sink.PidCount[CAPTION_PID_1] == 0);
+		}
+	}
+
+	//	--- H.264 / H.265 ------------------------------------------------------
+	//	AviUtl2 側の m2v はこれらを復号出来ないが、**TVTest 側で捨てると
+	//	後段で何をしても取り返せない**。ここで確実に残す。
+	{
+		const std::vector<BYTE> Ts2 = BuildAvcHevcStream();
+		std::printf("\nH.264/H.265 TS : %zu packets, service %u (0x1B, PID 0x%04X) and "
+					"service %u (0x24, PID 0x%04X)\n",
+					Ts2.size() / 188, SERVICE_H264, VIDEO_PID_H264,
+					SERVICE_H265, VIDEO_PID_H265);
+
+		//	TSMemory.cpp の GetTargetStreams() が渡すのと同じ組み合わせ
+		const DWORD Streams = CTsSelector::STREAM_MPEG2VIDEO
+							| CTsSelector::STREAM_H264
+							| CTsSelector::STREAM_H265;
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_H264, Streams);
+			Feed(&Selector, Ts2);
+			check("H.264 (0x1B) video is kept", Sink.PidCount[VIDEO_PID_H264] > 0);
+			check("H.264: the other service is dropped",
+				  Sink.PidCount[VIDEO_PID_H265] == 0);
+		}
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_H265, Streams);
+			Feed(&Selector, Ts2);
+			check("H.265 (0x24) video is kept", Sink.PidCount[VIDEO_PID_H265] > 0);
+			check("H.265: the other service is dropped",
+				  Sink.PidCount[VIDEO_PID_H264] == 0);
+		}
+
+		//	MPEG-2 だけを要求した場合は落ちる事。
+		//	これが落ちなければ StreamTypeList[] の並びと STREAM_* の
+		//	ビット位置がずれている
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_H264, CTsSelector::STREAM_MPEG2VIDEO);
+			Feed(&Selector, Ts2);
+			check("asking for MPEG-2 only drops the H.264 video",
+				  Sink.PidCount[VIDEO_PID_H264] == 0);
+		}
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_H265, CTsSelector::STREAM_H264);
+			Feed(&Selector, Ts2);
+			check("asking for H.264 only drops the H.265 video",
+				  Sink.PidCount[VIDEO_PID_H265] == 0);
+		}
+	}
+
+	//	--- 4K8K の音声 (LATM 0x11 / MPEG-4 raw 0x1C) --------------------------
+	//	AviUtl2 側は ADTS (0x0F) しか復号出来ないが、ここで捨てると
+	//	後から取り返せない
+	{
+		const std::vector<BYTE> Ts3 = BuildUhdStream();
+		std::printf("\nUHD TS : service %u (HEVC + LATM 0x11) and "
+					"service %u (HEVC + MPEG-4 raw 0x1C)\n",
+					SERVICE_4K1, SERVICE_4K2);
+
+		//	TSMemory.cpp の GetTargetStreams() が音声ありで渡す組み合わせ
+		const DWORD Streams = CTsSelector::STREAM_MPEG2VIDEO
+							| CTsSelector::STREAM_H264
+							| CTsSelector::STREAM_H265
+							| CTsSelector::STREAM_AAC
+							| CTsSelector::STREAM_AAC_LATM
+							| CTsSelector::STREAM_MPEG4_AUDIO;
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_4K1, Streams);
+			Feed(&Selector, Ts3);
+			check("UHD: the HEVC video is kept", Sink.PidCount[VIDEO_PID_4K1] > 0);
+			check("UHD: the LATM audio (0x11) is kept",
+				  Sink.PidCount[AUDIO_PID_4K1] > 0);
+		}
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_4K2, Streams);
+			Feed(&Selector, Ts3);
+			check("UHD: the MPEG-4 raw audio (0x1C) is kept",
+				  Sink.PidCount[AUDIO_PID_4K2] > 0);
+		}
+
+		//	ADTS だけを要求した場合は落ちる事。
+		//	落ちなければ StreamTypeList[] の並びとビット位置がずれている
+		{
+			CSink Sink;
+			CTsSelector Selector;
+			Selector.SetOutputDecoder(&Sink);
+			Selector.SetTargetServiceID(SERVICE_4K1,
+										CTsSelector::STREAM_H265 | CTsSelector::STREAM_AAC);
+			Feed(&Selector, Ts3);
+			check("UHD: asking for ADTS only drops the LATM audio",
+				  Sink.PidCount[AUDIO_PID_4K1] == 0);
+			check("UHD: the video is still kept in that case",
+				  Sink.PidCount[VIDEO_PID_4K1] > 0);
 		}
 	}
 

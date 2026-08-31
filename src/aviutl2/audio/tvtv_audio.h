@@ -49,11 +49,15 @@ public:
 		NotTried,		// audio=0 なので開いていない
 		Ok,
 		NoStream,		// 音声のストリームが無い (TVTest 側が落としている等)
+		UnsupportedFormat,	// 音声は在るが復号出来ない形式 (4K8K の LATM 等)
 		DecodeFailed,	// Media Foundation で復号出来なかった
 		Empty,			// 時間差を詰めた結果、残らなかった
 	};
 
 	Result GetResult() const { return m_Result; }
+
+	//	UnsupportedFormat の時の stream_type (0x11 / 0x1C)
+	BYTE GetUnsupportedAudioType() const { return m_UnsupportedAudioType; }
 
 	//	診断用
 	double GetAudioLeadSeconds() const { return m_LeadSeconds; }
@@ -64,5 +68,6 @@ private:
 	WAVEFORMATEX m_Format;
 	double m_LeadSeconds;
 	Result m_Result;
+	BYTE m_UnsupportedAudioType = 0;
 	WCHAR m_szError[128];
 };

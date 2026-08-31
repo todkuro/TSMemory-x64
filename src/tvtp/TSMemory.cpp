@@ -583,14 +583,28 @@ void CTSMemory::FreeBuffer()
 //	CTsSelector に残させるストリームの種別。
 //
 //	音声を含めないと、AviUtl2 側の m2v は音声を 1 つも見つけられない。
-//	既定が映像のみなのは、音声の取り込みが未検証な為
-//	(詳細は docs/audio-support.md)。
+//	既定が映像のみなのは、主な用途が静止画キャプチャで音声が要らない事と、
+//	音声 PID の分だけリングバッファを食う為 (詳細は docs/audio-support.md)。
+//
+//	H.264 / H.265 も落とさずに残す。
+//	AviUtl2 側の m2v は MPEG-2 専用でこれらを復号出来ないが、**ここで
+//	捨ててしまうと後段で何をしても取り返せない**。落とさずに溜めておけば、
+//	復号手段を用意した時にそのまま使える。
+//	MPEG-2 の放送では該当する PID が無く、何も変わらない。
 DWORD CTSMemory::GetTargetStreams() const
 {
-	DWORD Streams = CTsSelector::STREAM_MPEG2VIDEO;
+	DWORD Streams = CTsSelector::STREAM_MPEG2VIDEO
+				  | CTsSelector::STREAM_H264
+				  | CTsSelector::STREAM_H265;
 
-	if (m_fAudio)
-		Streams |= CTsSelector::STREAM_AAC;
+	//	音声も同じ理由で、扱える形式だけに絞らずに残す。
+	//	AviUtl2 側が復号出来るのは ADTS (0x0F) だけだが、4K8K の
+	//	LATM (0x11) / MPEG-4 raw (0x1C) を捨ててしまうと後で取り返せない
+	if (m_fAudio) {
+		Streams |= CTsSelector::STREAM_AAC
+				|  CTsSelector::STREAM_AAC_LATM
+				|  CTsSelector::STREAM_MPEG4_AUDIO;
+	}
 
 	//	字幕 (stream_type 0x06)。**AviUtl2 側だけを 1 にしても届かない。**
 	//	ここで落とすと後段で何をしても取り返せない

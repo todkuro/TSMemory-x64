@@ -891,6 +891,25 @@ void RunConvertTests()
 			  == L"<$字幕><tw0.5>あ<tw>｡<tw0.5>あ");
 	}
 
+	//	3n-2. **既に半角の字にも <tw> を掛けない。**
+	//	   JIS X 0201 片仮名の集合は、中型の時に復号側 (arib_text) が
+	//	   丸ごと半角へ写す。ここへ来る時点で ｱ (U+FF71) 等になっており、
+	//	   半角形の表には載っていない。IsHalfwidth が拾えていないと
+	//	   更に横半分へ潰され、幅が 1/4 になる
+	{
+		std::vector<AribItem> Items;
+		AribItem m; m.Type = AribItemType::Size; m.A = 5; m.B = 10;
+		AribItem t; t.Type = AribItemType::Text;
+		t.Text = L"ｺﾞｰﾑ";			// ｹﾞｰﾑ
+		Items.push_back(m); Items.push_back(t);
+		AribToAviUtl2Options o2 = opt;
+		o2.UseBroadcastColor = false;
+		std::vector<int> Drcs;
+		check("halfwidth katakana is not squashed again by MSZ",
+			  AribItemsToAviUtl2(Items, o2, &Drcs)
+			  == L"<$字幕>ｺﾞｰﾑ");
+	}
+
 	//	3o. **半角化するのは中型の時だけ。**標準 (NSZ) では全角のまま
 	{
 		std::vector<AribItem> Items;

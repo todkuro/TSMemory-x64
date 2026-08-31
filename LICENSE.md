@@ -28,6 +28,7 @@ GPL は「同じリポジトリにある」「同じフォルダにある」こ�
 | `src/m2v/idct_reference.c` | MPEG Software Simulation Group | ファイル冒頭の表示のとおり (無償・無保証) |
 | `src/aviutl2/` (音声の `audio/`・字幕の `caption/` を含む), `src/common/`, `tools/` | 本リポジトリで新規に作成 | 制約なし |
 | `src/aviutl2/caption/arib_gaiji.h` / `.cpp` | libaribcaption の対応表から**自動生成** (`tools/regen-gaiji.sh`) | **MIT** — Copyright (C) 2021 magicxqq |
+| `src/aviutl2/caption/arib_drcs_map.h` | libaribcaption の DRCS 置換表から**自動生成** (`tools/regen-drcs-map.sh`) | **MIT** — Copyright (C) 2022 magicxqq |
 | `tests/test_selector.cpp`, `tests/test_multich.cpp` | BonTsEngine のヘッダを include | **GPL-2.0-or-later** |
 | `tests/` のその他 (`tests/tools/` を含む) | 本リポジトリで新規に作成 | 制約なし |
 | `res/`, `docs/`, `licenses/`, `.vscode/` | 本リポジトリで新規に作成 (`licenses/` に置くライセンス全文を除く) | 制約なし |
@@ -42,12 +43,20 @@ GPL は「同じリポジトリにある」「同じフォルダにある」こ�
 - `licenses/AviUtl2-Plugin-SDK-license.txt`
 - `licenses/libaribcaption-license.txt`
 
-### 追加記号の対応表について
+### 対応表について
 
-ARIB STD-B24 の区点から Unicode への対応表だけを
-[libaribcaption](https://github.com/xqq/libaribcaption) (MIT) から借りています。
-`tools/regen-gaiji.sh` が `src/aviutl2/caption/arib_gaiji.h` / `.cpp` を
-生成し、**生成物の冒頭に著作権表示を残しています**。
+[libaribcaption](https://github.com/xqq/libaribcaption) (MIT) から
+**対応表だけ**を 2 つ借りています。どちらも生成する道具を用意し、
+**生成物の冒頭に著作権表示を残しています**。
+
+| 生成物 | 借りている表 | 作り直す |
+| --- | --- | --- |
+| `src/aviutl2/caption/arib_gaiji.h` / `.cpp` | ARIB STD-B24 の区点 → Unicode | `tools/regen-gaiji.sh` |
+| `src/aviutl2/caption/arib_drcs_map.h` | 外字 (DRCS) の字形の md5 → Unicode | `tools/regen-drcs-map.sh` |
+
+後者は、放送の外字の多くが Unicode に実在する文字をビットマップで
+送っているだけである事を利用して、フォントを組み立てずに本物の文字へ
+置き換える為の物です。
 
 区 85-94 は ARIB の追加漢字・追加記号で、Shift_JIS の同じ位置には別の
 文字が載っています。表が無いと放送どおりの文字を出せません

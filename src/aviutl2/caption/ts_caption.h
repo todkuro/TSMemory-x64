@@ -1,17 +1,22 @@
 //----------------------------------------------------------------------------
 //	*.tvtv の字幕
 //
-//	bridge.cpp から見える唯一の窓口。字幕対応は
-//	src/aviutl2/caption/ に閉じており、このヘッダだけを include すれば足りる。
+//	bridge.cpp から見える窓口。字幕対応は src/aviutl2/caption/ に
+//	閉じており、取り込みの側はこのヘッダだけを include すれば足りる。
 //	無効時 (`[Caption] Enable=0`) はこのクラスを作らないので、
 //	字幕側のコードは一切動かない。
+//
+//	※ 外字の下ごしらえだけは初期化の時に済ませる必要がある為、
+//	   plugin_main.cpp が drcs_store.h / drcs_replace.h を直に呼ぶ。
+//	   そちらも `Enable=0` の時は動かない (drcs_store.h の説明を参照)。
 //
 //	中でやっている事:
 //	  ts_caption     … 共有メモリの TS から字幕のデータユニットを取り出す
 //	  arib_text      … ARIB STD-B24 の 8 単位符号を解く
 //	  arib_to_aviutl2… AviUtl2 のテキスト制御文字に直す
 //	  drcs_ttf       … 外字の字形を TrueType に組み立てる
-//	  drcs_font      … それを AviUtl2 に登録する
+//	  drcs_replace   … 字形を本物の文字に置き換える (対応表)
+//	  drcs_store     … 置き換えられない字形を貯めて次の起動で登録する
 //----------------------------------------------------------------------------
 #pragma once
 
@@ -68,8 +73,7 @@ public:
 	int GetCount() const { return static_cast<int>(m_Captions.size()); }
 	const TSMemoryCaption &Get(int Index) const { return m_Captions[Index]; }
 
-	//	組み立てた外字フォント (空なら外字は無かった)
-	const std::vector<BYTE> &GetFont() const { return m_Font; }
+	//	この取り込みで出て来た外字の数 (字形を引けた物)
 	int GetGlyphCount() const { return static_cast<int>(m_GlyphCount); }
 
 	//	字形が届かなかった外字の数 (リングバッファの窓の外で定義された物)
@@ -87,6 +91,24 @@ public:
 	//	0 なら古い TSMemory.tvtp と組み合わせている
 	int GetStreamGlyphCount() const { return m_StreamGlyphs; }
 
+	//	**対応表で本物の文字に置き換えられた数。**
+	//	放送の外字の多くは Unicode に実在する文字なので、ここで賄える。
+	//	この分はフォントが要らず、その回の取り込みから出る
+	int GetReplacedGlyphCount() const { return m_ReplacedGlyphs; }
+
+	//	貯め込みが上限に達して入らなかった字形の数。
+	//	**再起動しても出ない**ので、案内を分ける必要がある
+	int GetStoreFullGlyphCount() const { return m_StoreFullGlyphs; }
+
+	//	対応表に無かった字形の md5 (空白区切り)。
+	//	利用者が TSMemoryDrcsMap.txt に足せるようにログへ出す
+	LPCWSTR GetUnknownMd5() const { return m_UnknownMd5.c_str(); }
+
+	//	**次の起動から使える様になった字形の数。**
+	//	フォントは初期化の時にしか渡せないので、初めて見た字形は
+	//	今回は代替文字になり、次の起動から出る
+	int GetNewGlyphCount() const { return m_NewGlyphs; }
+
 	//	**外字が化ける時の切り分け用。**
 	//	どの符号の字形をどこから拾ったかを 1 行にまとめた物。
 	//	`[Caption] Debug=1` の時にログへ出す
@@ -96,11 +118,14 @@ public:
 
 private:
 	std::vector<TSMemoryCaption> m_Captions;
-	std::vector<BYTE> m_Font;
 	size_t m_GlyphCount = 0;
 	int m_MissingGlyphs = 0;
 	int m_CachedGlyphs = 0;
 	int m_StreamGlyphs = 0;
+	int m_NewGlyphs = 0;
+	int m_ReplacedGlyphs = 0;
+	int m_StoreFullGlyphs = 0;
+	std::wstring m_UnknownMd5;
 	std::wstring m_GlyphReport;
 	WCHAR m_szError[128] = {};
 };

@@ -14,6 +14,8 @@
 
 #include "ts_caption.h"
 #include "arib_text.h"
+#include "drcs_store.h"
+#include "drcs_replace.h"
 
 namespace {
 
@@ -269,11 +271,14 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 							const AribToAviUtl2Options &Options)
 {
 	m_Captions.clear();
-	m_Font.clear();
 	m_GlyphCount = 0;
 	m_MissingGlyphs = 0;
 	m_CachedGlyphs = 0;
 	m_StreamGlyphs = 0;
+	m_NewGlyphs = 0;
+	m_ReplacedGlyphs = 0;
+	m_StoreFullGlyphs = 0;
+	m_UnknownMd5.clear();
 	m_GlyphReport.clear();
 	m_szError[0] = L'\0';
 
@@ -542,11 +547,51 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 	//	変換はフォントを組み立てる前に済んでいるので、その時点では
 	//	字形が揃うかどうかが判らない
 	std::set<size_t> MissingIndex;
+	//	参照の添字 -> 私用領域の枠 (今のフォントに入っている物だけ)
+	std::map<size_t, int> SlotOf;
+	//	参照の添字 -> 置き換える本物の文字 (対応表で引けた物)
+	std::map<size_t, std::wstring> TextOf;
 
-	//	--- 外字のフォントを組み立てる ---------------------------------------
-	//	割り当てた順 (DrcsCodes) と同じ並びで字形を並べる
+	//	--- 外字をどう出すかを決める -----------------------------------------
+	//	**上から順に試す。**
+	//	  1. 対応表で本物の文字に置き換える → その回から出る
+	//	  2. 貯め込みのフォントに既に入っている → その回から出る
+	//	  3. 初めて見る字形 → 貯めて、次の起動から出す。今回は代替文字
+	//
+	//	1 が効くのは、放送の外字の多くが Unicode に実在する文字を
+	//	ビットマップで送っているだけだから (drcs_replace.h を参照)
 	if (!DrcsCodes.empty() && !Options.DrcsFont.empty()) {
-		std::vector<TSMemoryDrcsGlyph> List;
+		auto Place = [&](size_t i, const TSMemoryDrcsGlyph &g) {
+			std::wstring Text, Md5;
+			if (TSMemoryDrcsReplaceFind(g, &Text, &Md5)) {
+				TextOf[i] = Text;
+				m_ReplacedGlyphs++;
+				return;
+			}
+
+			//	**引けなかった md5 を控えておく。**
+			//	利用者が TSMemoryDrcsMap.txt に足せるようにする為
+			if (!Md5.empty() && m_UnknownMd5.find(Md5) == std::wstring::npos) {
+				if (!m_UnknownMd5.empty())
+					m_UnknownMd5 += L" ";
+				m_UnknownMd5 += Md5;
+			}
+
+			//	**枠は字形の中身で決まる。**ARIB の符号は番組ごとに
+			//	意味が変わるので、そのまま私用領域に写すと別の番組で
+			//	違う字が出る。中身で引けば取り違えない
+			const int Slot = TSMemoryDrcsStoreAdd(g);
+			if (Slot >= 0 && Slot < TSMemoryDrcsStoreLoadedCount()) {
+				SlotOf[i] = Slot;			// 今のフォントに入っている
+				return;
+			}
+			MissingIndex.insert(i);
+			if (Slot < 0)
+				m_StoreFullGlyphs++;		// 貯め込みが一杯。再起動しても出ない
+			else
+				m_NewGlyphs++;				// 貯めた。次の起動から出る
+		};
+
 		for (size_t i = 0; i < DrcsCodes.size(); i++) {
 			auto it = Glyphs.find(DrcsCodes[i]);
 			if (it == Glyphs.end()) {
@@ -559,12 +604,10 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 						GlyphKey(pids.Service, CaptionPid, DrcsCodes[i]));
 					if (c != g_GlyphCache.end()
 							&& Now - c->second.Tick <= GLYPH_CACHE_LIFE_MS) {
-						TSMemoryDrcsGlyph g = c->second.Glyph;
-						g.Code = static_cast<wchar_t>(Options.DrcsFirstCode + i);
-						List.push_back(g);
 						m_CachedGlyphs++;
 						fCached = true;
 						Report(DrcsCodes[i], L"キャッシュ");
+						Place(i, c->second.Glyph);
 					}
 				}
 				if (!fCached) {
@@ -576,37 +619,66 @@ bool CTSCaptionSource::Open(const char *pszSharedName,
 			}
 			Report(DrcsCodes[i],
 				   StreamCodes.count(DrcsCodes[i]) ? L"蓄積" : L"本編");
-			TSMemoryDrcsGlyph g = it->second;
-			g.Code = static_cast<wchar_t>(Options.DrcsFirstCode + i);
-			List.push_back(g);
+			Place(i, it->second);
 		}
-		if (!List.empty()) {
-			m_GlyphCount = List.size();
-			TSMemoryBuildDrcsFont(List, Options.DrcsFont.c_str(), &m_Font);
-		}
+		m_GlyphCount = SlotOf.size() + TextOf.size();
 
-		//	**字形の無い外字は代替文字に差し替える。**
-		//	変換はフォントを組み立てる前に済んでいるので、字形が無くても
-		//	`<@外字フォント>` + 私用領域の文字が出てしまっている。
-		//	そのままだとフォントに字が無く、**豆腐 (□) になる**
-		//	(実機で `《` `》` が □ になっていた)。
-		//	組み立てた後に判るので、ここで置き換える
-		if (!MissingIndex.empty()) {
-			const std::wstring Prefix = L"<@" + Options.DrcsFont + L">";
-			for (size_t i : MissingIndex) {
-				std::wstring From = Prefix;
-				From += static_cast<wchar_t>(Options.DrcsFirstCode + i);
-				From += L"<@>";
-				for (TSMemoryCaption &c : m_Captions) {
-					for (size_t p = c.Text.find(From); p != std::wstring::npos;
-							p = c.Text.find(From, p)) {
-						c.Text.replace(p, From.size(), Options.DrcsFallback);
-						p += Options.DrcsFallback.size();
-					}
+		//	**変換の時点では枠が判らない。**
+		//	字形は変換の後に揃うので、本文には「参照の順番」で仮の
+		//	私用領域の文字が入っている。ここで本当の枠に付け替え、
+		//	フォントに無い物は代替文字にする。
+		//	付け替えないと**フォントに無い字を指して豆腐 (□) になる**
+		//	**1 回の走査で書き換える。**順に置換すると、付け替えた先の
+		//	番号を次の回でまた拾ってしまう (0 番 -> 2 番、2 番 -> 0 番 の
+		//	ような入れ替えで壊れる)
+		const std::wstring Prefix = L"<@" + Options.DrcsFont + L">";
+		const std::wstring Suffix = L"<@>";
+		const size_t Unit = Prefix.size() + 1 + Suffix.size();
+
+		for (TSMemoryCaption &c : m_Captions) {
+			std::wstring Out;
+			Out.reserve(c.Text.size());
+			size_t p = 0;
+			while (p < c.Text.size()) {
+				const size_t q = c.Text.find(Prefix, p);
+				if (q == std::wstring::npos || q + Unit > c.Text.size()) {
+					Out.append(c.Text, p, std::wstring::npos);
+					break;
 				}
+				const size_t n = static_cast<size_t>(
+					c.Text[q + Prefix.size()] - Options.DrcsFirstCode);
+				if (n >= DrcsCodes.size()
+						|| c.Text.compare(q + Prefix.size() + 1,
+										  Suffix.size(), Suffix) != 0) {
+					//	外字の書き方ではない。そのまま送る
+					Out.append(c.Text, p, q + Prefix.size() - p);
+					p = q + Prefix.size();
+					continue;
+				}
+
+				Out.append(c.Text, p, q - p);
+				auto t = TextOf.find(n);
+				auto s = SlotOf.find(n);
+				if (t != TextOf.end()) {
+					//	**本物の文字なのでフォントを切り替えない。**
+					//	本文の書体のまま出て、編集も検索もできる
+					Out += t->second;
+				} else if (s != SlotOf.end()) {
+					Out += Prefix;
+					Out += static_cast<wchar_t>(Options.DrcsFirstCode + s->second);
+					Out += Suffix;
+				} else {
+					Out += Options.DrcsFallback;
+				}
+				p = q + Unit;
 			}
+			c.Text.swap(Out);
 		}
 	}
+
+	//	**足した字形があれば貯め込みを書き直す。**
+	//	フォントに入るのは次の起動時 (drcs_store.h 参照)
+	TSMemoryDrcsStoreFlush();
 
 	return !m_Captions.empty();
 }

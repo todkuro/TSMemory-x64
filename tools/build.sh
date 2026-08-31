@@ -141,7 +141,7 @@ done
 
 #	字幕 (src/aviutl2/caption/)。音声と同じく既存のコードとは分けてある
 mkdir -p "$BUILD/aviutl2/caption"
-for b in drcs_font drcs_ttf arib_text arib_gaiji arib_to_aviutl2 ts_caption; do
+for b in drcs_font drcs_ttf drcs_store drcs_replace arib_text arib_gaiji arib_to_aviutl2 ts_caption; do
 	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
 		-o "$BUILD/aviutl2/caption/$b.o" "$ROOT/src/aviutl2/caption/$b.cpp"
 done
@@ -150,12 +150,13 @@ $RC -I "$ROOT/src/m2v" -o "$BUILD/aviutl2/tsmemory_rc.o" "$ROOT/src/aviutl2/tsme
 
 #	-lmfplat -lmfuuid は音声 (Media Foundation の AAC デコーダ) 用
 #	-ldwrite は字幕の外字 (DRCS) をフォントとして渡す為
+#	-lbcrypt は外字の字形の md5 を取る為 (対応表を引く鍵)
 $CXX -shared -O2 -static -o "$DIST/TSMemory-TVTestSrc.aux2" \
 	"$BUILD"/m2v/*.o "$BUILD"/aviutl2/*.o "$BUILD"/aviutl2/audio/*.o \
 	"$BUILD"/aviutl2/caption/*.o \
 	-Wl,--error-limit=0 \
 	-lshlwapi -lcomctl32 -lgdi32 -luser32 -lole32 -loleaut32 -lwindowscodecs -luuid \
-	-lmfplat -lmfuuid -ldwrite
+	-lmfplat -lmfuuid -ldwrite -lbcrypt
 
 #---------------------------------------------------------------------------
 # 3. TVTest プラグイン
@@ -209,7 +210,7 @@ cp "$ROOT/res/English.TSMemory-TVTestSrc.aul2" "$PKG/aviutl2/Language/"
 cp "$ROOT/res/script/"*.anm2 "$PKG/aviutl2/Script/"
 cp "$ROOT/README.md"              "$PKG/"
 cp "$ROOT/CHANGELOG.md"           "$PKG/"
-# README から参照している調査メモ
+# README から参照している文書 (字幕の説明・調査メモ)
 mkdir -p "$PKG/docs"
 cp "$ROOT/docs/"*.md               "$PKG/docs/"
 # ライセンス表記。TSMemory.tvtp は BonTsEngine を含む為 GPL の全文が必要、

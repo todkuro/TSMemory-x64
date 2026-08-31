@@ -23,6 +23,8 @@
 #include "capture.h"
 #include "exitguard.h"
 #include "drcs_font.h"
+#include "caption/drcs_store.h"
+#include "caption/drcs_replace.h"
 #include "inifile.h"
 
 //	版は CHANGELOG.md が唯一の正で、tools/build.sh が
@@ -209,11 +211,34 @@ EXTERN_C __declspec(dllexport) void RegisterPlugin(HOST_APP_TABLE *host)
 	//	終了時の保存確認の自動応答 (既定では無効)
 	TSMemoryExitGuardStart(host, g_pLogger, g_szIniFileName);
 
-	//	外字 (DRCS) をフォントとして渡せるかの検証。
-	//	字幕対応の可否がここに掛かっている為、実機で確かめられるようにする。
+	TSMemoryFontSetHost(host, g_pEdit);
+
+	//	**外字 (DRCS) の下ごしらえ。**
+	//	`[Caption] Enable=0` の時は何もしない (字幕側のコードを一切
+	//	動かさない為。ts_caption.h の説明を参照)。
+	if (::GetPrivateProfileIntW(L"Caption", L"Enable", 0, g_szIniFileName) != 0) {
+		//	貯めてある字形。対応表で本物の文字に置き換えられなかった分が
+		//	ここに溜まっている (drcs_store.h 参照)
+		TSMemoryDrcsStoreLoad(g_szIniFileName);
+
+		//	利用者が足した対応表。組み込みの表で引けなかった字形は
+		//	md5 をログに出しているので、TSMemoryDrcsMap.txt に書けば
+		//	次の取り込みから出る (drcs_replace.h 参照)
+		TSMemoryDrcsReplaceLoad(g_szIniFileName);
+
+		//	**貯めた字形をフォントにして本体に渡す。**
+		//	register_font_collection() は初期化の中でしか受け付けない為、
+		//	ここでしか渡せない。取り込みで新しく受け取った字形が使える
+		//	ようになるのは次の起動から
+		WCHAR szDrcsFont[64] = {};
+		TSMemoryGetIniString(g_szIniFileName, L"Caption", L"DrcsFont",
+							 L"TSMemory DRCS", szDrcsFont, ARRAYSIZE(szDrcsFont));
+		TSMemoryDrcsStoreRegisterFont(szDrcsFont);
+	}
+
+	//	外字のフォントを実機で確かめる為の隠し設定。
 	//	  [Caption]
 	//	  FontProbe=<フォントファイルのパス>
-	TSMemoryFontSetHost(host, g_pEdit);
 	{
 		//	UTF-8 (BOM 無し) の ini から日本語を含むパスを読む為、
 		//	生の GetPrivateProfileStringW ではなく専用の物を使う

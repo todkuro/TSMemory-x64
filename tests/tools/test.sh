@@ -174,11 +174,13 @@ clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_com
 	"${BONTS_OBJS[@]}" -luser32
 #	字幕 (ARIB STD-B24 の 8 単位符号)
 clang++ -O1 -static -std=c++17 -fms-extensions \
-	-I"$ROOT/src/aviutl2/caption" \
+	-I"$ROOT/src/aviutl2/caption" -I"$ROOT/src/aviutl2" \
 	-o "$BUILD/tests/test_caption.exe" "$ROOT/tests/test_caption.cpp" \
 	"$ROOT/src/aviutl2/caption/arib_text.cpp" \
 	"$ROOT/src/aviutl2/caption/arib_gaiji.cpp" \
-	"$ROOT/src/aviutl2/caption/arib_to_aviutl2.cpp" -luser32
+	"$ROOT/src/aviutl2/caption/arib_to_aviutl2.cpp" \
+	"$ROOT/src/aviutl2/caption/drcs_replace.cpp" \
+	"$ROOT/tests/stub_log.cpp" -luser32 -lshlwapi -lbcrypt
 # -static: 起動時に libunwind.dll 等を探しに行かないようにする
 clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_compat.h" \
 	-I"$ROOT/sdk/aviutl2" -I"$ROOT/src/common" -I"$ROOT/tests" \

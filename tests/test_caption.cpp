@@ -19,6 +19,8 @@
 #include "arib_text.h"
 #include "arib_to_aviutl2.h"
 #include "arib_gaiji.h"
+#include "drcs_replace.h"
+#include "arib_drcs_map.h"
 
 namespace {
 
@@ -1330,6 +1332,80 @@ void RunConvertTests()
 	std::printf("\n");
 }
 
+//	外字 (DRCS) を本物の文字に置き換える対応表
+//
+//	**放送の外字の多くは Unicode に実在する文字。**ここで賄えた分は
+//	フォントの登録が要らず、その回の取り込みから出る (drcs_replace.h)
+void RunDrcsMapTests()
+{
+	std::printf("=== 外字の対応表 ===\n");
+
+	check("the built-in table is not empty", TSMemoryDrcsMapCount > 0);
+
+	//	**二分探索の前提。**並んでいないと引けない字形が出る
+	bool fSorted = true;
+	for (int i = 1; i < TSMemoryDrcsMapCount; i++) {
+		if (::memcmp(TSMemoryDrcsMap[i - 1].Md5,
+					 TSMemoryDrcsMap[i].Md5, 16) >= 0)
+			fSorted = false;
+	}
+	check("the built-in table is sorted by md5 (binary search needs it)", fSorted);
+
+	//	表の中身が引ける事。端と真ん中を見る
+	bool fAllFound = true;
+	const int Probe[] = { 0, TSMemoryDrcsMapCount / 2, TSMemoryDrcsMapCount - 1 };
+	for (int i : Probe) {
+		std::wstring Out;
+		if (!TSMemoryDrcsReplaceFindByMd5(TSMemoryDrcsMap[i].Md5, &Out)
+				|| Out.empty())
+			fAllFound = false;
+	}
+	check("entries in the built-in table can be looked up", fAllFound);
+
+	//	**𠮷 (U+20BB7) はサロゲートペアになる。**
+	//	1 コード単位で返すと壊れるので、2 単位で返る事を見る
+	{
+		bool fPair = false, fHasSmp = false;
+		for (int i = 0; i < TSMemoryDrcsMapCount; i++) {
+			if (TSMemoryDrcsMap[i].Code >= 0x10000) {
+				fHasSmp = true;
+				std::wstring Out;
+				if (TSMemoryDrcsReplaceFindByMd5(TSMemoryDrcsMap[i].Md5, &Out)
+						&& Out.size() == 2
+						&& Out[0] >= 0xD800 && Out[0] <= 0xDBFF
+						&& Out[1] >= 0xDC00 && Out[1] <= 0xDFFF)
+					fPair = true;
+			}
+		}
+		check("characters outside the BMP come back as a surrogate pair",
+			  !fHasSmp || fPair);
+	}
+
+	//	無い物は無いと言う事
+	{
+		BYTE Zero[16] = {};
+		std::wstring Out;
+		check("an unknown md5 is not matched",
+			  !TSMemoryDrcsReplaceFindByMd5(Zero, &Out));
+	}
+
+	//	**md5 の取り方が libaribcaption と同じ事。**
+	//	生のビットマップだけを対象にする (幅・高さ・深さを含めない)。
+	//	ここがずれると表が 1 件も引けない。
+	//	md5("abc") = 900150983cd24fb0d6963f7d28e17f72 は既知の値
+	{
+		TSMemoryDrcsGlyph g;
+		g.Depth = 2; g.Width = 36; g.Height = 36;
+		g.Pattern.assign({ 'a', 'b', 'c' });
+		std::wstring Out, Md5;
+		TSMemoryDrcsReplaceFind(g, &Out, &Md5);
+		check("the md5 is taken over the bitmap only",
+			  Md5 == L"900150983cd24fb0d6963f7d28e17f72");
+	}
+
+	std::printf("\n");
+}
+
 }	// namespace
 
 
@@ -1339,6 +1415,7 @@ int main(int argc, char **argv)
 
 	RunUnitTests();
 	RunConvertTests();
+	RunDrcsMapTests();
 
 	const char *pszPath = argc > 1 ? argv[1] : nullptr;
 	const bool fDump = argc > 2 && std::strcmp(argv[2], "--dump") == 0;

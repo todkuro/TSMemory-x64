@@ -268,13 +268,10 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 
 	AribToAviUtl2Options opt;
 	opt.Preset = g_State.CaptionPreset;
-	//	**フォントを登録できない時は外字を使わない。**
-	//	AviUtl2 は初期化の中でしか register_font_collection を
-	//	受け付けない。字形を持っていても登録できないので、
-	//	<@外字フォント> を出しても豆腐になるだけ。
-	//	名前を空にすると変換側が代替文字 (既定は 〓) を出す
-	opt.DrcsFont = TSMemoryFontCanRegister() ? g_State.CaptionDrcsFont
-											 : std::wstring();
+	//	外字は `ProgramData\aviutl2\Font\TSMemoryDRCS.ttf` として置いてあり、
+	//	本体が起動時に読んでいる (drcs_store.h 参照)。
+	//	まだフォントに入っていない字形は変換側が代替文字 (既定は 〓) にする
+	opt.DrcsFont = g_State.CaptionDrcsFont;
 	opt.UseBroadcastColor = g_State.CaptionBroadcastColor;
 	opt.UseRuby = g_State.CaptionRuby;
 	opt.UseGlyphCache = g_State.CaptionDrcsCache;
@@ -293,11 +290,42 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	}
 
 	//	**外字のフォントはここでは登録できない。**
-	//	AviUtl2 は RegisterPlugin の中でしか受け付けず、後から呼ぶと
-	//	例外を投げて AviUtl2 ごと落ちる (実機のログ:
-	//	 not register except initialize in
+	//	AviUtl2 は RegisterPlugin の中でしか register_font_collection を
+	//	受け付けず、後から呼ぶと例外を投げて AviUtl2 ごと落ちる
+	//	(実機のログ: not register except initialize in
 	//	 Plugin::CommonPluginService::registerFontCollection())。
-	//	その為 opt.DrcsFont を空にしてあり、外字は代替文字で出る
+	//	その為、対応表で引けなかった字形は貯めるだけにしてある。
+	//	今回は代替文字で出て、次に AviUtl2 を起動した時から本来の字が出る
+	//	(drcs_store.h 参照)
+	if (Source.GetNewGlyphCount() > 0) {
+		WCHAR sz[192];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 初めて見る外字が %d 個ありました。"
+						   L"AviUtl2 を再起動すると出るようになります",
+						   Source.GetNewGlyphCount());
+		Log(sz);
+	}
+
+	//	**貯め込みが一杯の時は再起動しても出ない。**
+	//	上と混ぜると嘘の案内になるので分ける
+	if (Source.GetStoreFullGlyphCount() > 0) {
+		WCHAR sz[224];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 外字の蓄積が一杯で %d 個を覚えられませんでした。"
+						   L"TSMemoryDRCS.dat を消すと貯め直します",
+						   Source.GetStoreFullGlyphCount());
+		LogWarn(sz);
+	}
+
+	//	**対応表に無かった字形を知らせる。**
+	//	TSMemoryDrcsMap.txt に `md5 = 文字` と書けば次の取り込みから出る
+	if (g_State.CaptionDebug && Source.GetUnknownMd5()[0] != L'\0') {
+		WCHAR sz[512];
+		::StringCchPrintfW(sz, ARRAYSIZE(sz),
+						   L"TSMemory: 対応表に無い外字 : %s",
+						   Source.GetUnknownMd5());
+		Log(sz);
+	}
 
 	const double Rate = (edit->info != nullptr && edit->info->scale > 0)
 						? static_cast<double>(edit->info->rate) / edit->info->scale : 0.0;
@@ -476,7 +504,7 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 				fBackOk = false;
 			} else {
 				//	**項目は全てここで入れ直す。**
-				//	%ProgramData%viutl2\Default\<名前>.effect が
+				//	%ProgramData%\aviutl2\Default\<名前>.effect が
 				//	あると、スクリプトの --track@ の既定より
 				//	そちらが優先される。黙って別の値で動くのを防ぐ
 				char szv[16];
@@ -501,9 +529,12 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 	WCHAR sz[224];
 	::StringCchPrintfW(sz, ARRAYSIZE(sz),
 					   L"TSMemory: 字幕を %d 件配置しました "
-					   L"(レイヤー %d-%d / 最大 %d 行 / 外字 %d 字形)",
+					   L"(レイヤー %d-%d / 最大 %d 行 / 外字 %d 字 : "
+					   L"置換 %d / フォント %d)",
 					   Placed, Layer + 1, Layer + UsedLayers, UsedLayers,
-					   Source.GetGlyphCount());
+					   Source.GetGlyphCount(),
+					   Source.GetReplacedGlyphCount(),
+					   Source.GetGlyphCount() - Source.GetReplacedGlyphCount());
 	Log(sz);
 
 	if (Dropped > 0) {
@@ -534,12 +565,9 @@ bool PlaceCaptions(EDIT_SECTION *edit, LPCWSTR pszFile,
 
 	//	**フォントの一覧に載っているかを取り込み時に確かめる。**
 	//	初期化の中では 0 件しか返らない (実測) ので、ここで見る。
-	//	ProgramDataviutl2\Font に置いた外字フォントが
-	//	本体から見えているかの切り分け用
-	if (g_State.CaptionDebug) {
+	//	初期化で登録した外字フォントが本体から見えているかの切り分け用
+	if (g_State.CaptionDebug)
 		TSMemoryVerifyFont(g_State.CaptionDrcsFont.c_str());
-		TSMemoryVerifyFont(L"TSMemoryDRCS");
-	}
 
 	//	**外字が化ける時はここを見る。**どの符号をどこから拾ったかが判る
 	if (g_State.CaptionDebug && Source.GetGlyphReport()[0] != L'\0') {

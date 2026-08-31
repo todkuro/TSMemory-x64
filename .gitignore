@@ -52,6 +52,7 @@
 !/tests/tools/fuzz-locate.cpp
 !/tests/tools/fuzz-locate.sh
 !/tests/tools/gen-ts-examples.cpp
+!/tests/tools/make-drcs-dat.py
 !/tests/tools/gen-ts-examples.sh
 !/tests/tools/fetch-ts-samples.sh
 !/tests/tools/m2ts2ts.py

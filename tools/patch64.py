@@ -1071,4 +1071,25 @@ patch("registry.c", [
     ('=GetPrivateProfileIntA("settings","', '=get_ini_int("'),
 ])
 
+# --- store_work_frame() の NULL 参照 ------------------------------------
+#     s = in->cur / in->bwd の直後に s->prm.index へ書き込んでおり、
+#     NULL の判定はその後にある。参照フレームがまだ無い状態
+#     (取り込んだ直後やシークの直後) では NULL への書き込みになる。
+#
+#     実機で AviUtl2 ごと落ちた。WER の記録は
+#       例外コード c0000005 / 障害モジュール TSMemory-TVTestSrc.aux2
+#       例外オフセット 0x143ce = store_work_frame+0xae
+#     逆アセンブルすると movq %rax,(%r15) で、その直後に
+#     testq %r15,%r15 (= if (s == NULL)) が続いていた。
+#
+#     **オリジナルの m2v から同じ**で、64bit 化で入れた物ではない
+#     (third_party/TSMemory/TVTestSrc/mpeg_video.c で確認)。
+#     判定の順序を入れ替えるだけで、他の挙動は変わらない。
+#
+#     ※ 挿入する C のコメントは ASCII のみ
+patch("mpeg_video.c", [
+    ("		case WORK_FRAME_CUR:\n			s = in->cur;\n			s->prm.index = in->cur_index;\n			break;\n		case WORK_FRAME_BWD:\n			s = in->bwd;\n			s->prm.index = in->bwd_index;\n			break;\n",
+     "		case WORK_FRAME_CUR:\n			/* The NULL check below used to come after these stores,\n			   so a missing reference frame wrote through NULL. */\n			s = in->cur;\n			if (s != NULL) {\n				s->prm.index = in->cur_index;\n			}\n			break;\n		case WORK_FRAME_BWD:\n			s = in->bwd;\n			if (s != NULL) {\n				s->prm.index = in->bwd_index;\n			}\n			break;\n"),
+])
+
 print("[patch64] done")

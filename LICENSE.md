@@ -26,7 +26,9 @@ GPL は「同じリポジトリにある」「同じフォルダにある」こ�
 | `sdk/aviutl2/` | AviUtl ExEdit2 Plugin SDK ([配布元](https://spring-fragrance.mints.ne.jp/aviutl/)。更新は `tools/update-aviutl2-sdk.sh`) | **MIT** — Copyright (c) 2025 Kenkun |
 | `src/m2v/` | MPEG-2 VIDEO VFAPI Plug-In (茂木和洋氏) を 64bit 化 | 作者による許諾 (下記 3 章)。無保証を受け入れる以外の制限なし |
 | `src/m2v/idct_reference.c` | MPEG Software Simulation Group | ファイル冒頭の表示のとおり (無償・無保証) |
-| `src/aviutl2/` (音声の `audio/` を含む), `src/common/`, `tools/` | 本リポジトリで新規に作成 | 制約なし |
+| `src/aviutl2/` (音声の `audio/`・字幕の `caption/` を含む), `src/common/`, `tools/` | 本リポジトリで新規に作成 | 制約なし |
+| `src/aviutl2/caption/arib_gaiji.h` / `.cpp` | libaribcaption の対応表から**自動生成** (`tools/regen-gaiji.sh`) | **MIT** — Copyright (C) 2021 magicxqq |
+| `src/aviutl2/caption/arib_drcs_map.h` | libaribcaption の DRCS 置換表から**自動生成** (`tools/regen-drcs-map.sh`) | **MIT** — Copyright (C) 2022 magicxqq |
 | `tests/test_selector.cpp`, `tests/test_multich.cpp` | BonTsEngine のヘッダを include | **GPL-2.0-or-later** |
 | `tests/` のその他 (`tests/tools/` を含む) | 本リポジトリで新規に作成 | 制約なし |
 | `res/`, `docs/`, `licenses/`, `.vscode/` | 本リポジトリで新規に作成 (`licenses/` に置くライセンス全文を除く) | 制約なし |
@@ -39,6 +41,30 @@ GPL は「同じリポジトリにある」「同じフォルダにある」こ�
 
 - `licenses/GPL-2.0.txt`
 - `licenses/AviUtl2-Plugin-SDK-license.txt`
+- `licenses/libaribcaption-license.txt`
+
+### 対応表について
+
+[libaribcaption](https://github.com/xqq/libaribcaption) (MIT) から
+**対応表だけ**を 2 つ借りています。どちらも生成する道具を用意し、
+**生成物の冒頭に著作権表示を残しています**。
+
+| 生成物 | 借りている表 | 作り直す |
+| --- | --- | --- |
+| `src/aviutl2/caption/arib_gaiji.h` / `.cpp` | ARIB STD-B24 の区点 → Unicode | `tools/regen-gaiji.sh` |
+| `src/aviutl2/caption/arib_drcs_map.h` | 外字 (DRCS) の字形の md5 → Unicode | `tools/regen-drcs-map.sh` |
+
+後者は、放送の外字の多くが Unicode に実在する文字をビットマップで
+送っているだけである事を利用して、フォントを組み立てずに本物の文字へ
+置き換える為の物です。
+
+区 85-94 は ARIB の追加漢字・追加記号で、Shift_JIS の同じ位置には別の
+文字が載っています。表が無いと放送どおりの文字を出せません
+(機械的に数えると 8836 区点のうち 214 個が別の文字になり、
+1200 個は出せませんでした)。
+
+コードは借りていません。表以外は本リポジトリで書いています。
+**GPL の `TSMemory.tvtp` には入りません** (字幕は `.aux2` 側だけです)。
 
 ### 確認方法
 

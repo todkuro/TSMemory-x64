@@ -125,7 +125,7 @@ done
 # 2. AviUtl ExEdit2 側プラグイン
 #---------------------------------------------------------------------------
 echo "[2/4] TSMemory-TVTestSrc.aux2"
-AUX2_INC="-I$BUILD/generated -I$ROOT/src/m2v -I$ROOT/sdk/aviutl2 -I$ROOT/src/common -I$ROOT/src/aviutl2 -I$ROOT/src/aviutl2/audio"
+AUX2_INC="-I$BUILD/generated -I$ROOT/src/m2v -I$ROOT/sdk/aviutl2 -I$ROOT/src/common -I$ROOT/src/aviutl2 -I$ROOT/src/aviutl2/audio -I$ROOT/src/aviutl2/caption"
 for b in input_tvtv bridge capture exitguard preset inifile plugin_main; do
 	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
 		-o "$BUILD/aviutl2/$b.o" "$ROOT/src/aviutl2/$b.cpp"
@@ -139,14 +139,24 @@ for b in ts_audio aac_decoder tvtv_audio; do
 		-o "$BUILD/aviutl2/audio/$b.o" "$ROOT/src/aviutl2/audio/$b.cpp"
 done
 
+#	字幕 (src/aviutl2/caption/)。音声と同じく既存のコードとは分けてある
+mkdir -p "$BUILD/aviutl2/caption"
+for b in drcs_font drcs_ttf drcs_store drcs_replace arib_text arib_gaiji arib_to_aviutl2 ts_caption; do
+	cc $CXX -c $CXXFLAGS -Wall -Wno-unknown-pragmas $AUX2_INC \
+		-o "$BUILD/aviutl2/caption/$b.o" "$ROOT/src/aviutl2/caption/$b.cpp"
+done
+
 $RC -I "$ROOT/src/m2v" -o "$BUILD/aviutl2/tsmemory_rc.o" "$ROOT/src/aviutl2/tsmemory.rc"
 
 #	-lmfplat -lmfuuid は音声 (Media Foundation の AAC デコーダ) 用
+#	-ldwrite は字幕の外字 (DRCS) をフォントとして渡す為
+#	-lbcrypt は外字の字形の md5 を取る為 (対応表を引く鍵)
 $CXX -shared -O2 -static -o "$DIST/TSMemory-TVTestSrc.aux2" \
 	"$BUILD"/m2v/*.o "$BUILD"/aviutl2/*.o "$BUILD"/aviutl2/audio/*.o \
+	"$BUILD"/aviutl2/caption/*.o \
 	-Wl,--error-limit=0 \
 	-lshlwapi -lcomctl32 -lgdi32 -luser32 -lole32 -loleaut32 -lwindowscodecs -luuid \
-	-lmfplat -lmfuuid
+	-lmfplat -lmfuuid -ldwrite -lbcrypt
 
 #---------------------------------------------------------------------------
 # 3. TVTest プラグイン
@@ -174,6 +184,13 @@ $CXX -shared -O2 -static -municode -o "$DIST/TSMemory.tvtp" \
 } > "$CCDB"
 rm -f "$CCDB_PARTS"
 
+#	プラグインは自分と同じ場所の ini を読む (src/aviutl2/plugin_main.h)。
+#	テストは dist/ の .aux2 をそのまま読み込む為、ここにも置いておかないと
+#	**テストが古い設定で走る**。
+#	更に [Capture] の設定は終了時に書き戻されるので、放っておくと
+#	「更新日時だけ新しく中身は古い」ファイルが残る。毎回入れ直す
+cp "$ROOT/res/TSMemory-TVTestSrc.aux2.ini" "$DIST/TSMemory-TVTestSrc.ini"
+
 #---------------------------------------------------------------------------
 # 4. 配布用のフォルダ構成とパッケージファイル
 #---------------------------------------------------------------------------
@@ -181,7 +198,7 @@ echo "[4/4] packaging"
 
 PKG="$BUILD/package"
 rm -rf "$PKG"
-mkdir -p "$PKG/TVTest/Plugins" "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc" "$PKG/aviutl2/Language"
+mkdir -p "$PKG/TVTest/Plugins" "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc" \n	"$PKG/aviutl2/Language" "$PKG/aviutl2/Script"
 
 cp "$DIST/TSMemory.tvtp"          "$PKG/TVTest/Plugins/"
 cp "$ROOT/res/TSMemory.tvtp.ini"  "$PKG/TVTest/Plugins/TSMemory.ini"
@@ -189,9 +206,11 @@ cp "$ROOT/res/TSMemory.tvtp.ini"  "$PKG/TVTest/Plugins/TSMemory.ini"
 cp "$DIST/TSMemory-TVTestSrc.aux2"          "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc/"
 cp "$ROOT/res/TSMemory-TVTestSrc.aux2.ini"  "$PKG/aviutl2/Plugin/TSMemory-TVTestSrc/TSMemory-TVTestSrc.ini"
 cp "$ROOT/res/English.TSMemory-TVTestSrc.aul2" "$PKG/aviutl2/Language/"
+#	字幕の背景を敷くスクリプト (src/aviutl2/caption/ から create_effect で貼る)
+cp "$ROOT/res/script/"*.anm2 "$PKG/aviutl2/Script/"
 cp "$ROOT/README.md"              "$PKG/"
 cp "$ROOT/CHANGELOG.md"           "$PKG/"
-# README から参照している調査メモ
+# README から参照している文書 (字幕の説明・調査メモ)
 mkdir -p "$PKG/docs"
 cp "$ROOT/docs/"*.md               "$PKG/docs/"
 # ライセンス表記。TSMemory.tvtp は BonTsEngine を含む為 GPL の全文が必要、
@@ -213,10 +232,11 @@ fi
 # AviUtl2 のプレビュー画面に D&D でインストール出来るパッケージファイル
 AU2PKG="$BUILD/au2pkg"
 rm -rf "$AU2PKG"
-mkdir -p "$AU2PKG/Plugin/TSMemory-TVTestSrc" "$AU2PKG/Language"
+mkdir -p "$AU2PKG/Plugin/TSMemory-TVTestSrc" "$AU2PKG/Language" "$AU2PKG/Script"
 cp "$DIST/TSMemory-TVTestSrc.aux2"             "$AU2PKG/Plugin/TSMemory-TVTestSrc/"
 cp "$ROOT/res/TSMemory-TVTestSrc.aux2.ini"     "$AU2PKG/Plugin/TSMemory-TVTestSrc/TSMemory-TVTestSrc.ini"
 cp "$ROOT/res/English.TSMemory-TVTestSrc.aul2" "$AU2PKG/Language/"
+cp "$ROOT/res/script/"*.anm2                    "$AU2PKG/Script/"
 # au2pkg は Plugin\ Script\ Language\ 等の配下しかインストールされない為、
 # ライセンス表記はプラグイン本体と同じフォルダに入れる
 cp "$ROOT/sdk/aviutl2/license.txt" 	"$AU2PKG/Plugin/TSMemory-TVTestSrc/AviUtl2-Plugin-SDK-license.txt"

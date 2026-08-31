@@ -178,6 +178,9 @@ static void GetSnapshotDirectory(LPTSTR pszDirectory)
 struct Snapshot {
 	HANDLE hFileMapping;
 	HANDLE hMutex;
+	//	字幕だけを長く溜めた分 ("<名前>.caption")。無い事もある
+	HANDLE hCaptionMapping;
+	HANDLE hCaptionMutex;
 	TCHAR szFileName[MAX_PATH];
 };
 
@@ -190,6 +193,22 @@ class CTSMemory : public TVTest::CTVTestPlugin, public CMediaDecoder
 	SIZE_T m_BufferPos;
 	SIZE_T m_BufferUsed;
 	HANDLE m_hFileMapping;
+
+	//	**字幕だけを別に、もっと長く溜める。**
+	//	外字 (DRCS) の字形は数十秒おきにしか流れて来ない
+	//	(実測の中央値 14.2 秒、最大 210 秒) 為、映像と同じリングでは
+	//	MemorySize (8〜14 秒相当) の窓から外れて拾えない。
+	//	字幕は取り込む量の 0.01〜0.02% しか無いので、
+	//	1MB あれば数十分ぶん入る。
+	//
+	//	**共有メモリではなく普通のメモリで持つ。**
+	//	取り込みの時に .caption という名前の共有メモリへ写す
+	std::vector<BYTE> m_CaptionRing;	// 188 バイト * m_CaptionSize
+	SIZE_T m_CaptionSize;				// パケット数 (0 なら無効)
+	SIZE_T m_CaptionPos;
+	SIZE_T m_CaptionUsed;
+	WORD m_CaptionPid;					// 0 なら判っていない
+
 	CMutexLock m_BufferLock;
 	CTsSelector m_TsSelector;
 	CTsPacket m_TsPacket;
@@ -202,6 +221,7 @@ class CTSMemory : public TVTest::CTVTestPlugin, public CMediaDecoder
 	TCHAR m_szTempDir[MAX_PATH];	// スナップショットを置くフォルダ
 	bool m_fCloseAviUtl;
 	bool m_fAudio;			// 音声も溜め込むか ([Settings] Audio)
+	bool m_fSubtitle;		// 字幕も溜め込むか ([Settings] Subtitle)
 	int m_SnapshotCount;
 	int m_LaunchWaitSeconds;
 
@@ -259,8 +279,13 @@ CTSMemory::CTSMemory()
 	, m_BufferPos(0)
 	, m_BufferUsed(0)
 	, m_hFileMapping(nullptr)
+	, m_CaptionSize(0)
+	, m_CaptionPos(0)
+	, m_CaptionUsed(0)
+	, m_CaptionPid(0)
 	, m_fCloseAviUtl(false)
 	, m_fAudio(false)
+	, m_fSubtitle(false)
 	, m_SnapshotCount(DEFAULT_SNAPSHOT_COUNT)
 	, m_LaunchWaitSeconds(30)
 	, m_TargetServiceID(0)
@@ -337,6 +362,41 @@ bool CTSMemory::Initialize()
 	//	音声も溜め込むか。既定は映像のみ (従来どおり)。
 	//	AviUtl2 側の [M2V] audio と揃えて使う。
 	m_fAudio = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Audio"), 0, m_szIniFileName) != 0;
+	//	字幕も溜め込むか。**既定は 1 (通す)。**
+	//	AviUtl2 側の [Caption] Enable が 0 なので、このままでは
+	//	字幕は置かれない。通しておくのは、欲しくなった時に
+	//	**AviUtl2 の再起動だけで切り替えられる**ようにする為
+	//	(この値は Initialize() でしか読まないので、0 にしていると
+	//	 変更に TVTest の再起動が要る)。
+	//	リングバッファを食う量は取り込む分の 0.01〜0.02% (実測)。
+	m_fSubtitle = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("Subtitle"), 1, m_szIniFileName) != 0;
+
+	//	**字幕だけを別に長く溜める大きさ (MB)。**
+	//	外字の字形は数十秒おきにしか流れて来ないので、映像と同じ
+	//	リングでは窓から外れる。字幕は取り込む量の 0.01〜0.02% しか
+	//	無いので、1MB でも数十分ぶん入る
+	{
+		int Mb = ::GetPrivateProfileInt(TEXT("Settings"),
+										TEXT("CaptionMemorySize"), 1,
+										m_szIniFileName);
+		if (Mb < 0)
+			Mb = 0;
+		else if (Mb > 64)
+			Mb = 64;
+		m_CaptionSize = m_fSubtitle
+						? static_cast<SIZE_T>(Mb) * 1024 * 1024 / 188 : 0;
+		if (m_CaptionSize > 0) {
+			//	**確保に失敗したら黙って無効にする。**
+			//	字幕そのものは映像側のリングからも取れるので、
+			//	ここで止める必要は無い
+			try {
+				m_CaptionRing.resize(m_CaptionSize * 188);
+			} catch (...) {
+				m_CaptionRing.clear();
+				m_CaptionSize = 0;
+			}
+		}
+	}
 
 	m_SnapshotCount = ::GetPrivateProfileInt(TEXT("Settings"), TEXT("SnapshotCount"),
 											 DEFAULT_SNAPSHOT_COUNT, m_szIniFileName);
@@ -546,6 +606,11 @@ DWORD CTSMemory::GetTargetStreams() const
 				|  CTsSelector::STREAM_MPEG4_AUDIO;
 	}
 
+	//	字幕 (stream_type 0x06)。**AviUtl2 側だけを 1 にしても届かない。**
+	//	ここで落とすと後段で何をしても取り返せない
+	if (m_fSubtitle)
+		Streams |= CTsSelector::STREAM_SUBTITLE;
+
 	return Streams;
 }
 
@@ -564,6 +629,16 @@ void CTSMemory::UpdateTargetService()
 
 		if (m_pApp->GetServiceInfo(Service, &Info))
 			ServiceID = Info.ServiceID;
+	}
+
+	//	**字幕の PID は TVTest が教えてくれる。**PMT を自前で解析しなくてよい
+	{
+		const int Service = m_pApp->GetService();
+		TVTest::ServiceInfo Info;
+		if (Service >= 0 && m_pApp->GetServiceInfo(Service, &Info))
+			m_CaptionPid = Info.SubtitlePID;
+		else
+			m_CaptionPid = 0;
 	}
 
 	if (ServiceID == m_TargetServiceID)
@@ -590,6 +665,10 @@ void CTSMemory::PurgeBuffer()
 	if (m_BufferLock.Lock()) {
 		m_BufferUsed = 0;
 		m_BufferPos = 0;
+		//	**字幕側も一緒に捨てる。**別のチャンネルの字形を
+		//	使い回すと、符号の意味が変わっているので化ける
+		m_CaptionUsed = 0;
+		m_CaptionPos = 0;
 		if (m_pBuffer != nullptr) {
 			BufferInfo *pInfo = reinterpret_cast<BufferInfo *>(m_pBuffer);
 			pInfo->Used = 0;
@@ -605,6 +684,10 @@ void CTSMemory::ReleaseSnapshots()
 	for (Snapshot &s : m_Snapshots) {
 		if (s.hFileMapping != nullptr)
 			::CloseHandle(s.hFileMapping);
+		if (s.hCaptionMapping != nullptr)
+			::CloseHandle(s.hCaptionMapping);
+		if (s.hCaptionMutex != nullptr)
+			::CloseHandle(s.hCaptionMutex);
 		if (s.hMutex != nullptr)
 			::CloseHandle(s.hMutex);
 		if (s.szFileName[0] != _T('\0'))
@@ -668,6 +751,52 @@ bool CTSMemory::CreateSnapshot(LPTSTR pszFileNameBuf)
 
 				::UnmapViewOfFile(pDest);
 
+				//	**字幕だけを長く溜めた分を "<名前>.caption" に写す。**
+				//	AviUtl2 側はここから外字の字形だけを拾う
+				//	(本文は上の本編から取る。古いパケットも含む為、
+				//	 本文まで拾うと重複したり時刻が合わなくなる)
+				if (m_CaptionUsed > 0) {
+					const DWORD CapSize =
+						static_cast<DWORD>(m_CaptionUsed * 188);
+					TCHAR szCapName[MAX_PATH];
+					TCHAR szCapMutex[MAX_PATH];
+					::StringCchPrintf(szCapName, ARRAYSIZE(szCapName),
+									  TEXT("%s.caption"), szName);
+					::StringCchPrintf(szCapMutex, ARRAYSIZE(szCapMutex),
+									  TEXT("%s.mutex"), szCapName);
+
+					s.hCaptionMutex = ::CreateMutex(&sa, FALSE, szCapMutex);
+					s.hCaptionMapping = ::CreateFileMapping(
+						INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE, 0,
+						static_cast<DWORD>(sizeof(BufferInfo)) + CapSize,
+						szCapName);
+					if (s.hCaptionMapping != nullptr) {
+						BYTE *pCap = static_cast<BYTE *>(::MapViewOfFile(
+							s.hCaptionMapping, FILE_MAP_WRITE, 0, 0, 0));
+						if (pCap != nullptr) {
+							BufferInfo *pCapInfo =
+								reinterpret_cast<BufferInfo *>(pCap);
+							pCapInfo->Size = CapSize;
+							pCapInfo->Used = CapSize;
+							pCapInfo->Pos = 0;
+							pCapInfo->Reserved = 0;
+
+							//	リングを線形化してコピーする
+							const SIZE_T First = min(m_CaptionUsed,
+													 m_CaptionSize - m_CaptionPos);
+							::CopyMemory(pCap + sizeof(BufferInfo),
+										 &m_CaptionRing[m_CaptionPos * 188],
+										 First * 188);
+							if (First < m_CaptionUsed) {
+								::CopyMemory(pCap + sizeof(BufferInfo) + First * 188,
+											 m_CaptionRing.data(),
+											 (m_CaptionUsed - First) * 188);
+							}
+							::UnmapViewOfFile(pCap);
+						}
+					}
+				}
+
 				//	AviUtl2 に渡すダミーファイル (0 バイト) を作る
 				HANDLE hFile = ::CreateFile(s.szFileName, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
 											CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -702,6 +831,10 @@ bool CTSMemory::CreateSnapshot(LPTSTR pszFileNameBuf)
 		if (!fOK) {
 			if (s.hFileMapping != nullptr)
 				::CloseHandle(s.hFileMapping);
+			if (s.hCaptionMapping != nullptr)
+				::CloseHandle(s.hCaptionMapping);
+			if (s.hCaptionMutex != nullptr)
+				::CloseHandle(s.hCaptionMutex);
 			if (s.hMutex != nullptr)
 				::CloseHandle(s.hMutex);
 		}
@@ -714,6 +847,10 @@ bool CTSMemory::CreateSnapshot(LPTSTR pszFileNameBuf)
 		Snapshot &s = m_Snapshots.front();
 		if (s.hFileMapping != nullptr)
 			::CloseHandle(s.hFileMapping);
+		if (s.hCaptionMapping != nullptr)
+			::CloseHandle(s.hCaptionMapping);
+		if (s.hCaptionMutex != nullptr)
+			::CloseHandle(s.hCaptionMutex);
 		if (s.hMutex != nullptr)
 			::CloseHandle(s.hMutex);
 		::DeleteFile(s.szFileName);
@@ -1074,6 +1211,25 @@ const bool CTSMemory::InputMedia(CMediaData *pMediaData, const DWORD dwInputInde
 		return true;
 
 	if (m_BufferLock.Lock()) {
+		//	**字幕は別のリングにも入れる。**映像と同じリングだと
+		//	MemorySize の窓から外れ、外字の字形を拾えない
+		if (m_CaptionSize > 0 && m_CaptionPid != 0) {
+			const BYTE *p = pMediaData->GetData();
+			const WORD Pid = static_cast<WORD>(((p[1] & 0x1F) << 8) | p[2]);
+			if (Pid == m_CaptionPid) {
+				::CopyMemory(&m_CaptionRing[
+						(m_CaptionPos + m_CaptionUsed) % m_CaptionSize * 188],
+					p, 188);
+				if (m_CaptionUsed < m_CaptionSize) {
+					m_CaptionUsed++;
+				} else {
+					m_CaptionPos++;
+					if (m_CaptionPos == m_CaptionSize)
+						m_CaptionPos = 0;
+				}
+			}
+		}
+
 		if (m_pBuffer != nullptr) {
 			BufferInfo *pInfo = reinterpret_cast<BufferInfo *>(m_pBuffer);
 

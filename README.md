@@ -22,6 +22,7 @@ AviUtl2 側
     TSMemory-TVTestSrc.aux2         汎用プラグイン (映像の読み込み・キャプチャ)
     TSMemory-TVTestSrc.ini          その設定
     English.TSMemory-TVTestSrc.aul2 英語表示用の言語ファイル
+    TSMemory字幕背景.anm2           字幕の背景と縁取りを付けるスクリプト
 
 
 ## ビルド
@@ -104,6 +105,7 @@ bash tests/tools/fetch-ts-samples.sh
        %ProgramData%\aviutl2\Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.aux2
        %ProgramData%\aviutl2\Plugin\TSMemory-TVTestSrc\TSMemory-TVTestSrc.ini
        %ProgramData%\aviutl2\Language\English.TSMemory-TVTestSrc.aul2
+       %ProgramData%\aviutl2\Script\TSMemory字幕背景.anm2
 
 2. TVTest の Plugins フォルダに `TSMemory.tvtp` と `TSMemory.ini` を入れます。
 
@@ -137,6 +139,24 @@ AviUtl 1.xx 版で必要だった「入力プラグイン優先度の設定」�
    ファイルメニューの「画像として保存 (TSMemory)」からも保存できます。
 
 4. 以後、キャプチャ実行キーを押すと AviUtl2 で読み込まれます。
+
+
+## 音声と字幕 (任意)
+
+どちらも**既定では無効**です。静止画キャプチャが主な用途な為、
+既定では映像だけを扱います。
+
+**[音声を取り込む (AAC)](docs/README_Audio.md)**
+
+映像に音声を付けて取り込みます。復号は Windows 標準の Media Foundation
+に任せているので、追加の DLL は要りません。**TVTest 側と AviUtl2 側の
+両方**の設定が要ります。
+
+**[字幕を取り込む (ARIB STD-B24)](docs/README_Subtitles.md)**
+
+字幕を、映像とは別のレイヤーに**テキストオブジェクトとして**並べます。
+画像の焼き込みではないので、後から書体も色も文言も直せます。
+外字 (DRCS) や背景・縁取りの扱いも同じ文書にあります。
 
 
 ## ヒント
@@ -188,15 +208,6 @@ AviUtl 1.xx 版で必要だった「入力プラグイン優先度の設定」�
 - TVTest の終了時に AviUtl2 も終了させたい場合は、`TSMemory.ini` の
   `AutoClose` を 1 にしてください。
 
-- 音声の取り込みに対応しています。有効にするには**両方**の設定が要ります。
-
-      TSMemory.ini (TVTest 側)           TSMemory-TVTestSrc.ini (AviUtl2 側)
-      [Settings]                         [M2V]
-      Audio=1                            audio=1
-
-  音声 PID の分だけリングバッファを食うので、同じ `MemorySize` なら
-  遡れる時間はその分短くなります。
-  静止画キャプチャが主な用途な為、既定は映像のみにしてあります。
 
 ## 注意
 
@@ -204,8 +215,6 @@ AviUtl 1.xx 版で必要だった「入力プラグイン優先度の設定」�
 
 - TVTest・AviUtl2・本プラグインは全て 64bit で揃える必要があります。
   32bit の TVTest では `TSMemory.tvtp` は読み込めません。
-
-- 字幕には対応していません。
 
 - 遡れる長さは `MemorySize` (既定 10MB) が上限です。地上デジタルの 1080i で
   おおよそ 8〜14 秒程度です。また、溜め込みはプラグインを有効にした時点から
@@ -297,8 +306,9 @@ AviUtl2 はメディアファイルの内容をパスをキーにキャッシュ
 ビルド方法、実装上の判断、隠し設定などは
 [docs/development.md](docs/development.md) にまとめてあります。
 
-音声対応の経緯 (調査メモ) は
+音声対応の経緯 (実装前の調査メモ) は
 [docs/audio-support.md](docs/audio-support.md) にあります。
+使い方は [docs/README_Audio.md](docs/README_Audio.md) の方です。
 
 全てAIを利用し書かせています。
 読みにくいかもですが、これらをAIに読ませればバグの検証などがやりやすくなるはずです。

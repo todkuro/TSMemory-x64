@@ -45,11 +45,14 @@
 !/tests/tools/raw2png.py
 !/tests/tools/ts-services.py
 !/tests/tools/analyze-levels.py
+!/tests/tools/mft-probe.cpp
+!/tests/tools/font-probe.cpp
 !/tests/tools/m2v-profile.cpp
 !/tests/tools/m2v-profile.sh
 !/tests/tools/fuzz-locate.cpp
 !/tests/tools/fuzz-locate.sh
 !/tests/tools/gen-ts-examples.cpp
+!/tests/tools/make-drcs-dat.py
 !/tests/tools/gen-ts-examples.sh
 !/tests/tools/fetch-ts-samples.sh
 !/tests/tools/m2ts2ts.py

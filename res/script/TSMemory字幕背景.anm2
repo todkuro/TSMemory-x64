@@ -1,0 +1,150 @@
+--information:TSMemory 字幕背景
+--track@padx:横余白,0,200,8,1
+--track@pady:縦余白,0,200,4,1
+--track@alpha:不透明度,0,100,50,1
+--track@orn:縁取り,0,20,2,1,なし
+--check@ornfit:縁を文字に合わせる,1
+--color@bgcol:背景色,0x000000
+--color@orncol:縁色,0x000000
+--check@dbg:デバッグ表示,0
+--[[
+	TSMemory の字幕に、放送と同じ「半透明の黒い箱」を敷き、
+	文字に縁を付ける。
+
+	**テキストの後ろに図形オブジェクトを置く方式にしていない理由。**
+	図形オブジェクトだと寸法が作った時点で固定されるので、
+	後からフォントや文字サイズを変えると箱がずれる。
+	このスクリプトは描画後の obj.w / obj.h を見るので、
+	書体・サイズ・文言を変えても箱が付いて来る。
+
+	**箱は obj.clearbuffer() で作る。obj.load("figure") は使わない。**
+	図形の名前が本当に「四角形」で通っているかを確かめる術が無く、
+	実機で楕円のような輪郭が出ていた。clearbuffer なら
+	「指定の大きさを単色で塗り潰したバッファ」がそのまま得られる。
+	伸ばす必要も無いので縦横比の指定も要らない。
+
+	**フレームバッファに直接 obj.draw() してはいけない。**
+	「obj.draw() を使用した場合スクリプト以降のフィルタ効果は
+	実行されません」(lua.txt) ので、後ろにある標準描画が飛ばされ、
+	オブジェクトの X/Y も拡大率も効かなくなる。
+	仮想バッファの中で合成してオブジェクトに書き戻し、
+	描画そのものは本体に任せる。
+
+	**デバッグ表示は print()。**obj.mes() はログではなく
+	「テキストオブジェクトのテキストに文字を挿入する」関数なので、
+	ここで呼んでも何も出ない。
+
+	放送の背景は文字セル (36 ドット角 + 字間 4 / 行間 24) の大きさで、
+	字形より一回り大きい。余白の既定値はそこから決めている。
+
+	不透明度の既定 50 は ARIB の色表の索引 65 = (0,0,0,α128) に合わせた値。
+
+	**縁取りはここで付ける。**AviUtl2 のテキストにも文字装飾
+	(`<@フォント,3>` = 縁取り文字) はあるが、あれはプリセットと
+	制御文字の持ち物で、字幕の側から触ると利用者の書体設定と
+	喧嘩する。ここで本体の「縁取り」フィルタを呼べば、
+	プリセットに手を入れずにこのスクリプトだけで完結する。
+
+	放送にも縁取りの指定 (ORN) は乗っているが、実測では
+	字幕を持つ 8 本中 2 本にしか現れず、来る時は必ず黒だった。
+	TVCaptionMod2 も既定 (StrokeWidth=-2) で全ての字幕に縁を付け、
+	ORN が来た時に太さを替えているだけなので、同じ考え方にしている。
+]]
+
+--	**縁取りは背景を敷く前に付ける。**後から付けると箱にも縁が付く。
+--
+--	**フィルタ効果の項目名は本体が持っている物。**「サイズ」「縁色」で
+--	通る事は実機で確認済みだが、本体の版が変われば変わり得る。
+--	名前が違えばエラーになるだけなので pcall で包み、
+--	失敗しても字幕そのものは出るようにしておく。
+--	効いたかどうかは obj.w が広がるかで判る (デバッグ表示に出す)。
+local ornw, ornh = obj.w, obj.h
+local ornox, ornoy = obj.ox, obj.oy
+local ornok, ornerr = true, nil
+
+--	**文字の大きさに合わせる。**TVCaptionMod2 の縁は文字の高さに
+--	対する相対 (StrokeWidth=-2)。こちらは絶対のドット数なので、
+--	そのままだと文字を大きくしても縁が太くならない。
+--	基準は「1080p で放送どおりの大きさ (<s72>) の 1 行」= obj.h 88
+--	(実機のログで 216x88 と出ていた値)。0 にはしない
+local ornsize = orn
+if ornfit == 1 and orn > 0 and ornh > 0 then
+	ornsize = math.floor(orn * ornh / 88 + 0.5)
+	if ornsize < 1 then ornsize = 1 end
+end
+
+if ornsize > 0 then
+	ornok, ornerr = pcall(function()
+		obj.effect("縁取り", "サイズ", ornsize, "縁色", orncol)
+	end)
+end
+
+--	**広がったぶんずらし戻す。**テキストオブジェクトの基準点は左上
+--	なので、四方に広がると文字が右下へ動いてしまう。
+--	実機で確認した所、本体の縁取りフィルタは obj.ox を触らない
+--	(216x88 -> 220x92 でも ox は 0 のままだった) ので、
+--	この補正が要る。ただし本体側がずらすようになった時に
+--	二重に動かさないよう、**動いていない時だけ**直す
+if obj.w > ornw and obj.ox == ornox and obj.oy == ornoy then
+	obj.ox = obj.ox - (obj.w - ornw) / 2
+	obj.oy = obj.oy - (obj.h - ornh) / 2
+end
+
+--	**先に取っておく事。**合成の後は余白のぶん大きくなるので、
+--	位置合わせに使うのは文字 (と縁) の幅
+local w = obj.w
+local h = obj.h
+
+if dbg == 1 and orn > 0 then
+	print("TSMemory字幕背景: 縁取り " .. (ornok and "成功" or "失敗")
+		  .. " size=" .. orn .. "->" .. ornsize
+		  .. " " .. ornw .. "x" .. ornh .. " -> " .. w .. "x" .. h
+		  .. " ox " .. ornox .. " -> " .. obj.ox
+		  .. " oy " .. ornoy .. " -> " .. obj.oy
+		  .. (ornerr and (" [" .. tostring(ornerr) .. "]") or ""))
+end
+
+if dbg == 1 then
+	print("TSMemory字幕背景: text=" .. w .. "x" .. h
+		  .. " padx=" .. padx .. " pady=" .. pady
+		  .. " alpha=" .. alpha
+		  .. " bgcol=" .. string.format("%06x", bgcol))
+end
+
+if w > 0 and h > 0 and alpha > 0 then
+	local bw = w + padx * 2
+	local bh = h + pady * 2
+	local text = "cache:tsmemory_caption_text"
+	local box  = "cache:tsmemory_caption_box"
+
+	obj.copybuffer(text, "object")
+	--	箱を「その大きさの単色バッファ」として直接作る
+	obj.clearbuffer(box, bw, bh, bgcol)
+
+	--	仮想バッファの中で「背景 + テキスト」を組み立てる。
+	--	仮想バッファへの描画はオブジェクトの座標を反映せず、
+	--	引数の座標そのままで描かれる (中心が 0,0)
+	obj.setoption("drawtarget", "tempbuffer", bw, bh)
+
+	obj.copybuffer("object", box)
+	obj.draw(0, 0, 0, 1.0, alpha / 100)
+
+	obj.copybuffer("object", text)
+	obj.draw(0, 0, 0, 1.0, 1.0)
+
+	obj.setoption("drawtarget", "framebuffer")
+	obj.copybuffer("object", "tempbuffer")
+
+	--	**余白のぶんずらし戻す。**
+	--	合成でオブジェクトが四方に余白だけ大きくなる。
+	--	テキストオブジェクトの基準点は左上 (文字揃え「左寄せ[上]」。
+	--	実機で確認済み) なので、そのままだと文字が右下へずれ、
+	--	背景を切った時と位置が変わってしまう
+	obj.ox = obj.ox - padx
+	obj.oy = obj.oy - pady
+
+	if dbg == 1 then
+		print("TSMemory字幕背景: 合成後 obj=" .. obj.w .. "x" .. obj.h
+			  .. " ox=" .. obj.ox .. " oy=" .. obj.oy)
+	end
+end

@@ -99,6 +99,16 @@ clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_com
 	"${BONTS_OBJS[@]}" -luser32
 "$BUILD/tests/test_selector.exe"
 
+#	外字 (DRCS) から組み立てた TTF が DirectWrite に通るか。
+#	自前でフォントを作る以上、「壊れていない」の判定は本物に読ませて行う。
+echo
+echo "=== test_drcs_ttf ==="
+clang++ -O1 -static -municode -std=c++17 -fms-extensions \
+	-I"$ROOT/src/aviutl2/caption" \
+	-o "$BUILD/tests/test_drcs_ttf.exe" "$ROOT/tests/test_drcs_ttf.cpp" \
+	"$ROOT/src/aviutl2/caption/drcs_ttf.cpp" -ldwrite -lole32
+"$BUILD/tests/test_drcs_ttf.exe" "$BUILD/tests/drcs.ttf"
+
 #	TVTest 側のプラグインを TVTest 無しで動かす。
 #	TS サンプルが無ければ「実際に溜める」確認だけを飛ばして通る。
 echo
@@ -162,6 +172,15 @@ clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_com
 	-I"$ROOT/src/tvtp" -I"$ROOT/sdk/aviutl2" -I"$ROOT/src/common" -I"$ROOT/tests" \
 	-o "$BUILD/tests/test_multich.exe" "$ROOT/tests/test_multich.cpp" \
 	"${BONTS_OBJS[@]}" -luser32
+#	字幕 (ARIB STD-B24 の 8 単位符号)
+clang++ -O1 -static -std=c++17 -fms-extensions \
+	-I"$ROOT/src/aviutl2/caption" -I"$ROOT/src/aviutl2" \
+	-o "$BUILD/tests/test_caption.exe" "$ROOT/tests/test_caption.cpp" \
+	"$ROOT/src/aviutl2/caption/arib_text.cpp" \
+	"$ROOT/src/aviutl2/caption/arib_gaiji.cpp" \
+	"$ROOT/src/aviutl2/caption/arib_to_aviutl2.cpp" \
+	"$ROOT/src/aviutl2/caption/drcs_replace.cpp" \
+	"$ROOT/tests/stub_log.cpp" -luser32 -lshlwapi -lbcrypt
 # -static: 起動時に libunwind.dll 等を探しに行かないようにする
 clang++ -O1 -static -std=c++17 -fms-extensions -include "$ROOT/src/tvtp/msvc_compat.h" \
 	-I"$ROOT/sdk/aviutl2" -I"$ROOT/src/common" -I"$ROOT/tests" \
@@ -199,6 +218,11 @@ for TS in "${TS_LIST[@]}"; do
 	echo
 	echo "=== test_fuzz [$NAME] ==="
 	(cd "$BUILD/tests" && ./test_fuzz.exe "$TS" "$ROOT/dist/TSMemory-TVTestSrc.aux2" 6)
+
+	#	字幕。字幕を持たない TS では test_caption 側が skip する
+	echo
+	echo "=== test_caption [$NAME] ==="
+	"$BUILD/tests/test_caption.exe" "$TS"
 
 	#	サービスが 1 つしかない TS では test_multich 側が skip する
 	echo

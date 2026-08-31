@@ -51,7 +51,8 @@
   `setup-tvtest-src.sh` / `setup-tsmemory-src.sh` / `setup-tvtplay-src.sh` /
   `setup-aviutl2.sh`、
   ソースを再生成する `regen-m2v.sh` / `patch64.py` / `gen_simd_stub.sh` /
-  `to_utf8.py` / `regen-gaiji.sh` / `gen_gaiji.py`、
+  `to_utf8.py` / `regen-gaiji.sh` / `gen_gaiji.py` /
+  `regen-drcs-map.sh` / `gen_drcs_map.py`、
   SDK を手動更新する `update-aviutl2-sdk.sh`。
 - `tests/` … テストのソース (`test_*.cpp` 等)。**バージョン管理する**。
 - `tests/tools/` … テスト・デバッグ用のスクリプトとツール。
@@ -94,9 +95,10 @@
 - `src/m2v/` への変更は `tools/patch64.py` に集約する。
   ソースを直接編集して済ませない (オリジナルから再生成できる状態を保つ)。
 - **生成したソースは commit する。**`src/m2v/` と
-  `src/aviutl2/caption/arib_gaiji.*` は生成物だが、クローン直後に
+  `src/aviutl2/caption/arib_gaiji.*` / `arib_drcs_map.h` は生成物だが、クローン直後に
   ビルドとテストが通る必要がある為に管理する。作り直す道具
-  (`regen-m2v.sh` / `regen-gaiji.sh`) は**ビルドから呼ばない**。
+  (`regen-m2v.sh` / `regen-gaiji.sh` / `regen-drcs-map.sh`) は
+  **ビルドから呼ばない**。
 
 ## 作業の進め方
 
@@ -109,9 +111,14 @@
   リリース時に書き換えるのは `CHANGELOG.md` だけ。
 - ドキュメントは以下の役割で分ける。
   - `README.md` … 利用者向け。オリジナルの `TSMemory.txt` と同じ粒度。
-    **版は書かない** (`CHANGELOG.md` を参照させる)
+    **版は書かない** (`CHANGELOG.md` を参照させる)。
+    **任意機能の詳細は置かない**。要点だけ書いて別の文書へ送る
+  - `docs/README_Audio.md` / `docs/README_Subtitles.md` … 利用者向け。
+    音声・字幕 (任意機能) の設定と手順。既定で無効な機能なので
+    README から分けている
   - `CHANGELOG.md` … 更新履歴。版の正
   - `docs/development.md` … 開発者向け。実装上の判断や動作確認の記録
   - `docs/audio-support.md` … 音声対応の調査メモ (実装済み。
-    実装前の調査と作業項目の記録として残している)
+    実装前の調査と作業項目の記録として残している)。
+    **使い方は書かない** (`docs/README_Audio.md` の役目)
   - `LICENSE.md` … ライセンスとその適用範囲
